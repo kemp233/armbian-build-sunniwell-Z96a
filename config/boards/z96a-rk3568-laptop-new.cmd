@@ -43,51 +43,56 @@ if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgro
 
 # === GPIO DEBUG: Scan all GPIO banks for input pins (power button detection) ===
 echo "=== GPIO DEBUG: Scanning all banks for input pins ==="
-# GPIO0 (Bank 0): gpio0[0-31]
+
+# GPIO0 (Bank 0): A0-A31
 for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input A${pin} 2>/dev/null; then
+    if gpio input A${pin}; then
         echo "GPIO0_A${pin} = HIGH"
     else
         echo "GPIO0_A${pin} = LOW"
     fi
 done
 
-# GPIO1 (Bank 1): gpio1[0-31] = B0-B31
+# GPIO1 (Bank 1): B0-B31
 for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input B${pin} 2>/dev/null; then
+    if gpio input B${pin}; then
         echo "GPIO1_B${pin} = HIGH"
     else
         echo "GPIO1_B${pin} = LOW"
     fi
 done
 
-# GPIO2 (Bank 2): gpio2[0-31] = C0-C31
+# GPIO2 (Bank 2): C0-C31
 for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input C${pin} 2>/dev/null; then
+    if gpio input C${pin}; then
         echo "GPIO2_C${pin} = HIGH"
     else
         echo "GPIO2_C${pin} = LOW"
     fi
 done
 
-# GPIO3 (Bank 3): gpio3[0-31] = D0-D31
+# GPIO3 (Bank 3): D0-D31
 for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input D${pin} 2>/dev/null; then
+    if gpio input D${pin}; then
         echo "GPIO3_D${pin} = HIGH"
     else
         echo "GPIO3_D${pin} = LOW"
     fi
 done
 
-# GPIO4 (Bank 4): gpio4[0-31] = E0-E31
+# GPIO4 (Bank 4): E0-E31
 for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input E${pin} 2>/dev/null; then
+    if gpio input E${pin}; then
         echo "GPIO4_E${pin} = HIGH"
     else
         echo "GPIO4_E${pin} = LOW"
     fi
 done
+
 echo "=== GPIO DEBUG DONE ==="
+
+# Simple delay - sleep if available, otherwise the GPIO scan output takes ~3-5 seconds
+sleep 3
 
 load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} ${prefix}uInitrd
 load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
@@ -121,7 +126,6 @@ else
 		source ${load_addr}
 	fi
 fi
-kaslrseed
 booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
 
 # Recompile with:
