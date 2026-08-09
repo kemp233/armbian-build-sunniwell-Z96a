@@ -254,22 +254,128 @@ on:
         - z96a-rk3568-laptop
         - z96a-rk3568-usb302-laptop
         - z96a-rk3568-usb311-laptop
+        - z96a-rk3568-laptop-new
 jobs:
 
   build:
     name: "Build Armbian"
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GPG_KEY: ${{ secrets.GPG_KEY1 }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE1 }}
     steps:
 
-      - uses: momokind/armbian-build@main
+      - name: Free Github Runner
+        uses: descriptinc/free-disk-space@main
         with:
-          armbian_token:              "${{secrets.GITHUB_TOKEN}}"
-          armbian_target:             "${{inputs.armbian_target}}"
-          armbian_release:            "${{inputs.armbian_release}}"
-          armbian_kernel_branch:      "${{inputs.armbian_kernel_branch}}"
-          armbian_ui:                 "${{inputs.armbian_ui}}"
-          armbian_board:              "${{inputs.armbian_board}}"
-          armbian_release_tittle:     "Armbian SDK"
-          armbian_release_body:       "Virtual images for x86 and arm64"
-          armbian_pgp_key:            "${{secrets.GPG_KEY1}}"
-          armbian_pgp_password:       "${{secrets.GPG_PASSPHRASE1}}"
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: "Import GPG key"
+        if: ${{ env.GPG_KEY != '' }}
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: "${{ secrets.GPG_KEY1 }}"
+          passphrase: "${{ secrets.GPG_PASSPHRASE1 }}"
+
+      - name: "Checkout Armbian os"
+        uses: actions/checkout@v4
+        with:
+          repository: armbian/os
+          fetch-depth: 0
+          clean: false
+          path: os
+
+      - name: "Checkout Armbian build framework (this fork)"
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          clean: false
+          path: build
+
+      - name: "Prepare userpatches"
+        shell: bash
+        run: |
+          # read version from upstream Armbian OS
+          cat os/stable.json | jq '.version' | sed "s/\"//g" | sed 's/^/ARMBIAN_VERSION=/' >> $GITHUB_ENV
+          [[ "${{ inputs.armbian_version }}" != '' ]] && echo "ARMBIAN_VERSION=${{ inputs.armbian_version }}" >> $GITHUB_ENV
+          # copy os userpatches
+          mkdir -pv build/userpatches
+          rsync -av os/userpatches/. build/userpatches/
+
+      - name: "Build Armbian"
+        shell: bash
+        run: |
+          # userspace decode
+          if [[ "${{ inputs.armbian_ui }}" == minimal ]]; then
+            BUILD_DESKTOP="no"
+            BUILD_MINIMAL="yes"
+          elif [[ "${{ inputs.armbian_ui }}" == server ]]; then
+            BUILD_DESKTOP="no"
+            BUILD_MINIMAL="no"
+          else
+            BUILD_DESKTOP="yes"
+            BUILD_MINIMAL="no"
+            DESKTOP_ENVIRONMENT="${{ inputs.armbian_ui }}"
+            DESKTOP_APPGROUPS_SELECTED=""
+            DESKTOP_ENVIRONMENT_CONFIG_NAME="config_base"
+          fi
+
+          # go to build folder
+          cd build
+
+          # execute build command
+          ./compile.sh "${{ inputs.armbian_target }}" \
+          REVISION="${{ env.ARMBIAN_VERSION }}" \
+          BOARD="${{ inputs.armbian_board }}" \
+          BRANCH="${{ inputs.armbian_kernel_branch }}" \
+          RELEASE="${{ inputs.armbian_release }}" \
+          KERNEL_CONFIGURE="no" \
+          BUILD_DESKTOP="${BUILD_DESKTOP}" \
+          BUILD_MINIMAL="${BUILD_MINIMAL}" \
+          DESKTOP_ENVIRONMENT="${DESKTOP_ENVIRONMENT}" \
+          DESKTOP_APPGROUPS_SELECTED="${DESKTOP_APPGROUPS_SELECTED}" \
+          DESKTOP_ENVIRONMENT_CONFIG_NAME="${DESKTOP_ENVIRONMENT_CONFIG_NAME}" \
+          ENABLE_EXTENSIONS="${{ inputs.armbian_extensions }}" \
+          COMPRESS_OUTPUTIMAGE="sha,img,xz" \
+          SHARE_LOG="yes" \
+          EXPERT="yes"
+
+      - name: "Sign"
+        shell: bash
+        if: ${{ env.GPG_PASSPHRASE != '' }}
+        run: |
+          echo "${{ secrets.GPG_PASSPHRASE1 }}" | \
+          gpg --passphrase-fd 0 --armor --detach-sign --pinentry-mode loopback --batch --yes \
+          build/output/images/*.img*.xz
+
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: "${{ env.ARMBIAN_VERSION }}"
+          name: "Armbian SDK"
+          artifacts: "build/output/images/*"
+          allowUpdates: true
+          removeArtifacts: false
+          replacesArtifacts: true
+          makeLatest: true
+          token: "${{ secrets.GITHUB_TOKEN }}"
+          body: |
+            Virtual images for x86 and arm64
+
+      - name: "Upload packages (kernel/uboot artifacts)"
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: "packages-${{ inputs.armbian_board }}-${{ inputs.armbian_kernel_branch }}"
+          path: |
+            build/output/packages-hashed/
+            build/output/images/*
+          if-no-files-found: ignore

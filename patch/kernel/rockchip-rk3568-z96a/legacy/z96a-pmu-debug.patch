@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: John Doe <john.doe@somewhere.on.planet>
+Date: Sat, 8 Aug 2026 00:05:00 +0800
+Subject: Patching kernel rockchip-rk3568-z96a files
+ drivers/soc/rockchip/pm_domains.c
+
+Debug: replace panic() with pr_err() to continue boot and capture PMU error details
+
+Signed-off-by: John Doe <john.doe@somewhere.on.planet>
+---
+ drivers/soc/rockchip/pm_domains.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/soc/rockchip/pm_domains.c b/drivers/soc/rockchip/pm_domains.c
+index 435102ba6740..006a1f5a0aa1 100644
+--- a/drivers/soc/rockchip/pm_domains.c
++++ b/drivers/soc/rockchip/pm_domains.c
+@@ -633,8 +633,8 @@ static int rockchip_pmu_set_idle_request(struct rockchip_pm_domain *pd,
+ 
+ 	return ret;
+ error:
+-	panic("panic_on_set_idle set ...\n");
+-	return ret;
++	pr_err("rockchip-pmu: non-fatal error on domain '%s', continuing boot\n", genpd->name);
++	return 0;
+ }
+ 
+ int rockchip_pmu_idle_request(struct device *dev, bool idle)

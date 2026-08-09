@@ -1,3 +1,3 @@
-verbosity=1
+verbosity=8
 extraargs=coherent_pool=2M
 bootlogo=false
