@@ -91,6 +91,20 @@ jobs:
         run: |
           cd build
           mkdir -p /tmp/uboot-out
+          
+          # Background watcher: capture artifacts before Armbian cleanup removes them
+          (
+            while true; do
+              for f in output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb \
+                       output/images/idbloader.img output/images/u-boot.itb output/images/u-boot.dtb \
+                       cache/sources/u-boot-rockchip64/.config; do
+                [ -f "$f" ] && cp -v "$f" /tmp/uboot-out/ 2>/dev/null
+              done
+              sleep 3
+            done
+          ) &
+          WATCHER_PID=$!
+          
           ./compile.sh uboot \
           REVISION="${{ env.ARMBIAN_VERSION }}" \
           BOARD="z96a-rk3568-laptop-new" \
@@ -101,10 +115,13 @@ jobs:
           COMPRESS_OUTPUTIMAGE="sha,img,xz" \
           SHARE_LOG="yes" \
           EXPERT="yes"
-          # Save artifacts before Armbian cleanup removes them
-          cp -v output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb /tmp/uboot-out/ 2>/dev/null || echo "No .deb found"
-          cp -v output/images/idbloader.img output/images/u-boot.itb output/images/u-boot.dtb /tmp/uboot-out/ 2>/dev/null || echo "No images found"
-          cp -v cache/sources/u-boot-rockchip64/.config /tmp/uboot-out/uboot.config 2>/dev/null || echo "No .config found"
+          
+          kill $WATCHER_PID 2>/dev/null || true
+          wait $WATCHER_PID 2>/dev/null || true
+          
+          # Rename .config for clarity
+          [ -f /tmp/uboot-out/.config ] && mv /tmp/uboot-out/.config /tmp/uboot-out/uboot.config
+          
           echo "=== Artifacts saved ==="
           ls -la /tmp/uboot-out/
 
