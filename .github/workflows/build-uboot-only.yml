@@ -85,18 +85,6 @@ jobs:
           clean: false
           path: build
 
-      - name: "Add V2 board to build framework"
-        shell: bash
-        run: |
-          cd build
-          # Ensure V2 board config is available for builds
-          if [ ! -f config/boards/z96a-rk3568-usb311-laptop-v2.conf ]; then
-            echo "V2 board config not found!"
-            exit 1
-          fi
-          echo "V2 board config present"
-          ls -la config/boards/z96a*v2*
-
       - name: "Prepare userpatches"
         shell: bash
         run: |
@@ -110,64 +98,6 @@ jobs:
         run: |
           cd build
           mkdir -p /tmp/uboot-out
-          
-          # First, let's create a debug script to extract GPIO/eDP info from running device
-          cat > /tmp/debug_edp.sh << 'EOF'
-#!/bin/bash
-# Run this ON THE DEVICE to debug eDP GPIOs and RK809-5
-echo "=== RK3568 GPIO Register Dump ==="
-for gpio in 0 1 2 3 4; do
-  base=$(awk -F' ' "/gpio${gpio}.*gpio/ {print \$2}" /proc/iomem 2>/dev/null | head -1)
-  if [ -n "$base" ]; then
-    echo "GPIO${gpio} base: 0x${base}"
-    # Use devmem to read registers
-    for reg in 0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c; do
-      val=$(devmem $(printf "0x%x" $((0x${base} + reg))) 32 2>/dev/null || echo "N/A")
-      echo "  0x${reg}: ${val}"
-    done
-  fi
-done
-
-echo ""
-echo "=== eDP / DP Registers ==="
-for reg in 0xfe6a0000 0xfe6b0000 0xfe6c0000 0xfe6d0000; do
-  echo "Register block 0x${reg}:"
-  for offset in 0x00 0x04 0x08 0x0c 0x10 0x14 0x18 0x1c 0x20 0x24 0x28 0x2c 0x30 0x34 0x38 0x3c; do
-    val=$(devmem $(printf "0x%x" $((reg + offset))) 32 2>/dev/null || echo "N/A")
-    echo "  0x${offset}: ${val}"
-  done
-done
-
-echo ""
-echo "=== RK809-5 I2C Detection ==="
-i2cdetect -y 0 2>/dev/null | grep -E "20|4e"
-echo ""
-echo "=== RK809-5 Register Dump (if detected at 0x20) ==="
-for reg in {0x00..0x7f}; do
-  val=$(i2cget -y 0 0x20 $reg 2>/dev/null || echo "N/A")
-  if [ "$val" != "N/A" ]; then
-    printf "  0x%02x: %s\n" $reg $val
-  fi
-done
-
-echo ""
-echo "=== PWM10 Status ==="
-cat /sys/class/pwm/pwmchip*/device/of_node/name 2>/dev/null | head -5
-ls -la /sys/class/pwm/ 2>/dev/null
-echo ""
-echo "=== Regulator vcc3v3_lcd0_n ==="
-cat /sys/class/regulator/vcc3v3_lcd0_n/state 2>/dev/null || echo "Not found"
-cat /sys/class/regulator/vcc3v3_lcd0_n/microvolts 2>/dev/null || echo "Not found"
-
-echo ""
-echo "=== Panel/Backlight Sysfs ==="
-ls -la /sys/class/backlight/ 2>/dev/null
-ls -la /sys/class/drm/ 2>/dev/null | head -20
-EOF
-          chmod +x /tmp/debug_edp.sh
-          echo "=== Debug script created at /tmp/debug_edp.sh ==="
-          echo "Run this ON THE DEVICE to get eDP/RK809-5 GPIO info"
-          cat /tmp/debug_edp.sh
           
           ./compile.sh uboot \
           REVISION="${{ env.ARMBIAN_VERSION }}" \
@@ -186,9 +116,6 @@ EOF
           find . -name "u-boot.itb" -exec cp -v {} /tmp/uboot-out/ \; 2>/dev/null || true
           find . -name "u-boot.dtb" -exec cp -v {} /tmp/uboot-out/ \; 2>/dev/null || true
           find . -path "*/u-boot-rockchip64/.config" -exec cp -v {} /tmp/uboot-out/uboot.config \; 2>/dev/null || true
-          
-          # Also save the debug script
-          cp /tmp/debug_edp.sh /tmp/uboot-out/debug_edp.sh
           
           echo "=== Artifacts saved ==="
           ls -la /tmp/uboot-out/
