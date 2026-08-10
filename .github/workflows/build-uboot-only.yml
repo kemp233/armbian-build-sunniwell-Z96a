@@ -90,6 +90,7 @@ jobs:
         shell: bash
         run: |
           cd build
+          mkdir -p /tmp/uboot-out
           ./compile.sh uboot \
           REVISION="${{ env.ARMBIAN_VERSION }}" \
           BOARD="z96a-rk3568-laptop-new" \
@@ -100,21 +101,16 @@ jobs:
           COMPRESS_OUTPUTIMAGE="sha,img,xz" \
           SHARE_LOG="yes" \
           EXPERT="yes"
+          # Save artifacts before Armbian cleanup removes them
+          cp -v output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb /tmp/uboot-out/ 2>/dev/null || echo "No .deb found"
+          cp -v output/images/idbloader.img output/images/u-boot.itb output/images/u-boot.dtb /tmp/uboot-out/ 2>/dev/null || echo "No images found"
+          cp -v cache/sources/u-boot-rockchip64/.config /tmp/uboot-out/uboot.config 2>/dev/null || echo "No .config found"
+          echo "=== Artifacts saved ==="
+          ls -la /tmp/uboot-out/
 
       - name: "Upload U-Boot artifacts"
         uses: actions/upload-artifact@v4
         with:
           name: "uboot-z96a-new-${{ inputs.armbian_kernel_branch }}-${{ inputs.armbian_release }}"
-          path: |
-            build/output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb
-            build/output/images/idbloader.img
-            build/output/images/u-boot.itb
-            build/output/images/u-boot.dtb
-            build/cache/sources/u-boot-rockchip64/.config
-          if-no-files-found: warn
-
-      - name: "Show artifact info"
-        run: |
-          ls -la build/output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb 2>/dev/null || true
-          ls -la build/output/images/idbloader.img build/output/images/u-boot.itb build/output/images/u-boot.dtb 2>/dev/null || true
-          echo "::notice::U-Boot build completed. Download artifacts from workflow run summary."
+          path: /tmp/uboot-out/*
+          if-no-files-found: error
