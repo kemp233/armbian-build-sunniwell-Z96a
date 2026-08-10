@@ -1,0 +1,120 @@
+name: "Build U-Boot Only (z96a-new)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      armbian_kernel_branch:
+        type: choice
+        description: 'Kernel branch (determines U-Boot source)'
+        options:
+          - legacy
+          - current
+          - edge
+        default: 'legacy'
+      armbian_release:
+        type: choice
+        description: 'Userspace (for packaging)'
+        options:
+          - jammy
+          - mantic
+          - bookworm
+          - trixie
+          - sid
+        default: 'jammy'
+      armbian_version:
+        description: 'Version override (optional)'
+        required: false
+        default: ''
+      clean_level:
+        type: choice
+        description: 'Clean level'
+        options:
+          - ''
+          - make-uboot
+          - debs
+        default: ''
+
+jobs:
+  build-uboot:
+    name: "Build U-Boot for z96a-new"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GPG_KEY: ${{ secrets.GPG_KEY1 }}
+      GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE1 }}
+    steps:
+      - name: Free Github Runner
+        uses: descriptinc/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: "Import GPG key"
+        if: ${{ env.GPG_KEY != '' }}
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: "${{ secrets.GPG_KEY1 }}"
+          passphrase: "${{ secrets.GPG_PASSPHRASE1 }}"
+
+      - name: "Checkout Armbian os (for version)"
+        uses: actions/checkout@v4
+        with:
+          repository: armbian/os
+          fetch-depth: 0
+          clean: false
+          path: os
+
+      - name: "Checkout Armbian build framework (this fork)"
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          clean: false
+          path: build
+
+      - name: "Prepare userpatches"
+        shell: bash
+        run: |
+          cat os/stable.json | jq '.version' | sed "s/\"//g" | sed 's/^/ARMBIAN_VERSION=/' >> $GITHUB_ENV
+          [[ "${{ inputs.armbian_version }}" != '' ]] && echo "ARMBIAN_VERSION=${{ inputs.armbian_version }}" >> $GITHUB_ENV
+          mkdir -pv build/userpatches
+          rsync -av os/userpatches/. build/userpatches/
+
+      - name: "Build U-Boot Only"
+        shell: bash
+        run: |
+          cd build
+          ./compile.sh uboot \
+          REVISION="${{ env.ARMBIAN_VERSION }}" \
+          BOARD="z96a-rk3568-laptop-new" \
+          BRANCH="${{ inputs.armbian_kernel_branch }}" \
+          RELEASE="${{ inputs.armbian_release }}" \
+          UBOOT_ONLY=yes \
+          CLEAN_LEVEL="${{ inputs.clean_level }}" \
+          COMPRESS_OUTPUTIMAGE="sha,img,xz" \
+          SHARE_LOG="yes" \
+          EXPERT="yes"
+
+      - name: "Upload U-Boot artifacts"
+        uses: actions/upload-artifact@v4
+        with:
+          name: "uboot-z96a-new-${{ inputs.armbian_kernel_branch }}-${{ inputs.armbian_release }}"
+          path: |
+            build/output/debs/linux-u-boot-z96a-new-legacy_*.deb
+            build/output/images/idbloader.img
+            build/output/images/u-boot.itb
+            build/output/images/u-boot.dtb
+            build/cache/sources/u-boot-rockchip64/.config
+          if-no-files-found: warn
+
+      - name: "Show artifact info"
+        run: |
+          ls -la build/output/debs/linux-u-boot-z96a-new-legacy_*.deb 2>/dev/null || true
+          ls -la build/output/images/idbloader.img build/output/images/u-boot.itb build/output/images/u-boot.dtb 2>/dev/null || true
+          echo "::notice::U-Boot build completed. Download artifacts from workflow run summary."
