@@ -106,7 +106,7 @@ jobs:
         with:
           name: "uboot-z96a-new-${{ inputs.armbian_kernel_branch }}-${{ inputs.armbian_release }}"
           path: |
-            build/output/debs/linux-u-boot-z96a-new-legacy_*.deb
+            build/output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb
             build/output/images/idbloader.img
             build/output/images/u-boot.itb
             build/output/images/u-boot.dtb
@@ -115,6 +115,6 @@ jobs:
 
       - name: "Show artifact info"
         run: |
-          ls -la build/output/debs/linux-u-boot-z96a-new-legacy_*.deb 2>/dev/null || true
+          ls -la build/output/packages-hashed/global/linux-u-boot-z96a-rk3568-laptop-new-legacy_*.deb 2>/dev/null || true
           ls -la build/output/images/idbloader.img build/output/images/u-boot.itb build/output/images/u-boot.dtb 2>/dev/null || true
           echo "::notice::U-Boot build completed. Download artifacts from workflow run summary."
