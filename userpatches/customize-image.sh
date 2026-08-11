@@ -48,8 +48,8 @@ if [ -z "${WIFIDEV}" ]; then
 fi
 
 # 4) 使用 nmcli 创建/修改连接（比直接写文件更可靠）
-SSID="你的WiFi名称"
-PSK="你的WiFi密码"
+SSID="2333666"
+PSK="enenredick233"
 CON_NAME="DefaultWiFi"
 
 # 如果已有同名连接则跳过创建
