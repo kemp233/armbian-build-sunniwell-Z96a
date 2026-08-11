@@ -91,10 +91,18 @@ load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfil
 fdt addr ${fdt_addr_r}
 fdt resize 65536
 
-# === FIX: Disable VOP2 display controller to bypass probe hang ===
-echo "--- Disabling VOP2 (display controller) to bypass probe hang at 7.64s ---"
+# === FIX: Disable NPU/VOP2/GPU to bypass power-domain ACK deadlock ===
+# Root cause: NPU power domain ('failed to get ack on domain npu') corrupts PMU state,
+# then VOP2 probe hangs at 7.64s, stalling all subsequent drivers (USB/SDIO).
+echo "--- Disabling NPU (failed power-domain ack corrupts PMU) ---"
+fdt set /npu@fde40000 status "disabled"
+echo "--- NPU disabled ---"
+# VOP2 hangs at 7.64s after NPU failure
 fdt set /vop@fe040000 status "disabled"
 echo "--- VOP2 disabled ---"
+# GPU shares VD_NPU domain in RK3568, disable to avoid cascade
+fdt set /gpu@fde60000 status "disabled"
+echo "--- GPU disabled ---"
 
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
