@@ -83,4 +83,124 @@ exit 0
 RCLOCALEOF
 chmod +x /etc/rc.local
 
+# === 新增：上电/电源/PMU 调试脚本和 systemd 服务 ===
+# 目的：开机时自动收集电源管理相关信息（PMIC、充电器、PD 控制器、regulator、GPIO、I2C 设备等）
+# 将产生日志到 /var/log/power-debug.log 并保留到 /var/log/power-debug-<date>.log
+
+cat > /usr/local/bin/power-debug.sh <<'POWDEBUG'
+#!/bin/bash
+set -euo pipefail
+LOGDIR=/var/log
+TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+OUT="${LOGDIR}/power-debug-${TIMESTAMP}.log"
+SUMMARY="${LOGDIR}/power-debug-latest.log"
+exec > >(tee -a "$OUT" "$SUMMARY") 2>&1
+
+echo "=== POWER DEBUG START: $(date -u) ==="
+uname -a
+cat /proc/cmdline || true
+
+echo "--- dmesg (last 200 lines) ---"
+dmesg | tail -n 200 || true
+
+echo "--- grep PM/PMU/NPU/CHARGE/PD ---"
+dmesg | grep -i -E 'pmu|pm_domain|power|rk809|rk817|cn3705|sc8886|husb|husb311|npu|rknpu|charger|battery|power_supply' || true
+
+echo "--- /sys/class/power_supply ---"
+if [ -d /sys/class/power_supply ]; then
+  for p in /sys/class/power_supply/*; do
+    echo "== $p =="
+    cat "$p"/uevent 2>/dev/null || true
+    for f in $(ls -1 "$p" 2>/dev/null); do
+      case "$f" in
+        uevent) ;;
+        type|status|online|present|capacity|voltage_now|current_now|charge_full|charge_now)
+          echo "$f:"; cat "$p/$f" 2>/dev/null || true;;
+      esac
+    done
+  done
+fi
+
+echo "--- /sys/class/regulator ---"
+if [ -d /sys/class/regulator ]; then
+  for r in /sys/class/regulator/*; do
+    echo "== $r =="; for f in enabled microvolts cur_microamp consumer_supply; do echo "$f:"; cat "$r/$f" 2>/dev/null || true; done
+  done
+fi
+
+# GPIO summary
+echo "--- GPIO status (/sys/kernel/debug/gpio if available, else /sys/class/gpio ) ---"
+if mountpoint -q /sys/kernel/debug; then
+  if [ -f /sys/kernel/debug/gpio ]; then
+    cat /sys/kernel/debug/gpio || true
+  fi
+fi
+if [ -d /sys/class/gpio ]; then
+  echo "Exported GPIOs:"; ls -1 /sys/class/gpio || true
+fi
+
+# I2C buses and devices
+echo "--- I2C buses (/sys/bus/i2c/devices) ---"
+if [ -d /sys/bus/i2c/devices ]; then
+  ls -l /sys/bus/i2c/devices || true
+  echo "-- Bus probes (if i2c-tools installed) --"
+  if command -v i2cdetect >/dev/null 2>&1; then
+    for bus in /sys/bus/i2c/devices/i2c-*; do
+      busnum=$(basename "$bus" | cut -d- -f2)
+      echo "i2cdetect -y -r $busnum" || true
+      i2cdetect -y -r "$busnum" || true
+    done
+  else
+    echo "i2c-tools (i2cdetect) not installed"
+  fi
+fi
+
+# List platform devices relevant to PMIC/charger
+echo "--- Platform devices (grep for pmu/charger/usb/power) ---"
+ls /sys/bus/platform/devices | egrep -i 'pmu|charger|usb|rk809|rk817|husb|cn3705|sc8886' || true
+
+# debugfs: clk and genpd
+echo "--- debugfs: clocks and genpd (if mounted) ---"
+if [ -d /sys/kernel/debug ]; then
+  if [ -f /sys/kernel/debug/clk/clk_summary ]; then
+    echo "--- clk_summary ---"; sed -n '1,200p' /sys/kernel/debug/clk/clk_summary || true
+  fi
+  if [ -d /sys/kernel/debug/pm_genpd ]; then
+    echo "--- pm_genpd ---"; ls -l /sys/kernel/debug/pm_genpd || true
+    for d in /sys/kernel/debug/pm_genpd/*; do echo "== $d =="; cat "$d" 2>/dev/null || true; done
+  fi
+fi
+
+# Show regulator/pmu kernel messages
+echo "--- journalctl -k | grep -i pmu|regulator (last 200 lines) ---"
+journalctl -k -n 200 --no-pager | egrep -i 'pmu|regulator|power domain|genpd|rk809|rk817|cn3705|sc8886|husb' || true
+
+# Save dmesg full to separate file for later upload
+dmesg > "${LOGDIR}/power-debug-dmesg-${TIMESTAMP}.log" || true
+
+# Keep only last 5 rotated logs to save space
+ls -1t ${LOGDIR}/power-debug-*.log 2>/dev/null | tail -n +6 | xargs -r rm -f
+
+echo "=== POWER DEBUG END: $(date -u) ==="
+POWDEBUG
+
+chmod +x /usr/local/bin/power-debug.sh || true
+
+cat > /etc/systemd/system/power-debug.service <<'POWDSVC'
+[Unit]
+Description=Power/PMU debug collector
+After=multi-user.target network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/power-debug.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+POWDSVC
+
+# Enable the service so it runs at first boot
+systemctl enable power-debug.service || true
+
 # End of script
