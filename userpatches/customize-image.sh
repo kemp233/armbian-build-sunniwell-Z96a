@@ -26,7 +26,7 @@ rm -f /root/.not_configured
 export DEBIAN_FRONTEND=noninteractive
 apt-get update || true
 # 安装 NetworkManager、wpasupplicant 与常见固件包；允许失败以免阻塞构建
-apt-get install -y network-manager wpasupplicant wireless-tools rfkill || true
+apt-get install -y network-manager wpasupplicant wireless-tools rfkill i2c-tools || true
 apt-get install -y firmware-realtek firmware-ralink linux-firmware || true
 
 # 1) 确保 NetworkManager 在启动时可用
@@ -83,10 +83,104 @@ exit 0
 RCLOCALEOF
 chmod +x /etc/rc.local
 
-# === 新增：上电/电源/PMU 调试脚本和 systemd 服务 ===
-# 目的：开机时自动收集电源管理相关信息（PMIC、充电器、PD 控制器、regulator、GPIO、I2C 设备等）
-# 将产生日志到 /var/log/power-debug.log 并保留到 /var/log/power-debug-<date>.log
+# === 新增：上电/电源/PMU 早期调试脚本和 systemd 服务（输出到串口） ===
+# 目的：在 sysinit 之前尽早运行，直接把结果输出到指定串口以方便只读 TTL 情况下观察
+# 请根据你的板子串口修改 TTY_PATH（默认使用 ttyS2，因为 boot script 中使用 console=ttyS2）
+TTY_PATH=/dev/ttyS2
 
+cat > /usr/local/bin/power-debug-early.sh <<'POWDBG'
+#!/bin/sh
+set -eu
+
+# power-debug-early.sh - run early and print directly to serial
+# Note: avoid commands requiring network or complex services
+
+echo "=== POWER DEBUG EARLY START: $(date -u) ==="
+uname -a || true
+
+echo "--- /proc/cmdline ---"
+cat /proc/cmdline || true
+
+echo "--- tail dmesg (last 200) ---"
+dmesg | tail -n 200 || true
+
+echo "--- dmesg grep PM/PMIC/charger/PD ---"
+dmesg | grep -i -E 'pmu|pm_domain|power|rk809|rk817|cn3705|sc8886|husb|husb311|charger|power_supply|regulator|genpd' || true
+
+echo "--- /sys/class/power_supply ---"
+if [ -d /sys/class/power_supply ]; then
+  for p in /sys/class/power_supply/*; do
+    echo "== $p =="
+    cat "$p"/uevent 2>/dev/null || true
+    for f in type status online present capacity voltage_now current_now; do
+      [ -f "$p/$f" ] && echo "$f: $(cat $p/$f 2>/dev/null)"
+    done
+  done
+fi
+
+echo "--- /sys/class/regulator summary ---"
+if [ -d /sys/class/regulator ]; then
+  for r in /sys/class/regulator/*; do
+    echo "== $r =="
+    [ -f "$r/enable" ] && echo "enable: $(cat $r/enable 2>/dev/null)"
+    [ -f "$r/microvolts" ] && echo "microvolts: $(cat $r/microvolts 2>/dev/null)"
+  done
+fi
+
+# GPIO quick summary
+if [ -f /sys/kernel/debug/gpio ]; then
+  echo "--- /sys/kernel/debug/gpio ---"
+  cat /sys/kernel/debug/gpio || true
+elif [ -d /sys/class/gpio ]; then
+  echo "--- exported GPIOs ---"
+  ls -l /sys/class/gpio || true
+fi
+
+# I2C quick scan if i2cdetect exists (safe, read-only scan)
+if command -v i2cdetect >/dev/null 2>&1; then
+  echo "--- i2c buses ---"
+  i2cdetect -l || true
+  for bus in /sys/bus/i2c/devices/i2c-*; do
+    busnum=$(basename "$bus" | cut -d- -f2)
+    echo "i2cdetect -y -r $busnum"
+    i2cdetect -y -r "$busnum" || true
+  done
+else
+  echo "i2c-tools not installed"
+fi
+
+# Platform devices relevant to PMIC/charger
+ls /sys/bus/platform/devices | egrep -i 'pmu|charger|usb|rk809|rk817|husb|cn3705|sc8886' || true
+
+echo "=== POWER DEBUG EARLY END: $(date -u) ==="
+POWDBG
+
+chmod +x /usr/local/bin/power-debug-early.sh || true
+
+cat > /etc/systemd/system/power-debug-early.service <<'POWESVC'
+[Unit]
+Description=Power/PMU early debug collector (prints to serial)
+DefaultDependencies=no
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/power-debug-early.sh
+StandardOutput=tty
+StandardError=inherit
+TTYPath=/dev/ttyS2
+TTYReset=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=sysinit.target
+POWESVC
+
+# Enable early service and disable getty on that tty to avoid conflict
+systemctl enable power-debug-early.service || true
+systemctl mask getty@ttyS2.service || true
+
+# === 保留之前的 power-debug 服务（full log to /var/log） ===
 cat > /usr/local/bin/power-debug.sh <<'POWDEBUG'
 #!/bin/bash
 set -euo pipefail
@@ -184,8 +278,6 @@ ls -1t ${LOGDIR}/power-debug-*.log 2>/dev/null | tail -n +6 | xargs -r rm -f
 echo "=== POWER DEBUG END: $(date -u) ==="
 POWDEBUG
 
-chmod +x /usr/local/bin/power-debug.sh || true
-
 cat > /etc/systemd/system/power-debug.service <<'POWDSVC'
 [Unit]
 Description=Power/PMU debug collector
@@ -200,7 +292,7 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 POWDSVC
 
-# Enable the service so it runs at first boot
+# Enable services so they run at first boot
 systemctl enable power-debug.service || true
 
 # End of script
