@@ -90,6 +90,12 @@ load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
 fdt resize 65536
+
+# === FIX: Disable VOP2 display controller to bypass probe hang ===
+echo "--- Disabling VOP2 (display controller) to bypass probe hang at 7.64s ---"
+fdt set /vop@fe040000 status "disabled"
+echo "--- VOP2 disabled ---"
+
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
 		echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay_file}.dtbo"
