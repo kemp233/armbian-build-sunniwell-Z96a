@@ -41,49 +41,6 @@ setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs
 
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1"; fi
 
-# === V2 eDP Display GPIO Debug ===
-echo "=========================================="
-echo "=== V2 eDP Display GPIO Debug ==="
-echo "=========================================="
-
-echo "--- GPIO3 (D bank) - panel enable GPIO3_A3 (pin 3) ---"
-echo "GPIO3_A3 direction:"
-gpio status D3
-echo "GPIO3_A3 value:"
-if gpio input D3; then echo "HIGH"; else echo "LOW"; fi
-
-echo "--- GPIO0 (A bank) - vcc3v3_lcd0_n GPIO0_C7 (pin 7) ---"
-echo "GPIO0_C7 direction:"
-gpio status A7
-echo "GPIO0_C7 value:"
-if gpio input A7; then echo "HIGH"; else echo "LOW"; fi
-
-echo "--- eDP HPD GPIO ---"
-echo "GPIO0_D5 (eDP_HPD) value:"
-if gpio input A29; then echo "HIGH"; else echo "LOW"; fi
-
-echo "--- PWM10 (backlight) ---"
-pwm status 10
-
-echo "--- RK809 PMIC regulators ---"
-regulator list
-
-echo "--- RK809 PMIC status ---"
-pmic dev rk809
-pmic dump
-
-echo "--- I2C0 bus scan ---"
-i2c bus
-i2c dev 0
-i2c probe
-
-echo "=========================================="
-echo "=== V2 eDP GPIO Debug DONE ==="
-echo "=========================================="
-
-# Simple delay to allow reading debug output
-sleep 5
-
 load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} ${prefix}uInitrd
 load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
 
@@ -91,18 +48,11 @@ load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfil
 fdt addr ${fdt_addr_r}
 fdt resize 65536
 
-# === FIX: Disable NPU/VOP2/GPU to bypass power-domain ACK deadlock ===
-# Root cause: NPU power domain ('failed to get ack on domain npu') corrupts PMU state,
-# then VOP2 probe hangs at 7.64s, stalling all subsequent drivers (USB/SDIO).
-echo "--- Disabling NPU (failed power-domain ack corrupts PMU) ---"
-fdt set /npu@fde40000 status "disabled"
-echo "--- NPU disabled ---"
-# VOP2 hangs at 7.64s after NPU failure
-fdt set /vop@fe040000 status "disabled"
-echo "--- VOP2 disabled ---"
-# GPU shares VD_NPU domain in RK3568, disable to avoid cascade
-fdt set /gpu@fde60000 status "disabled"
-echo "--- GPU disabled ---"
+# === FIX: Only blacklist NPU driver initcall (preserves power domain driver for USB) ===
+# Root cause: NPU power domain ACK failure corrupts PMU state, but kernel continues boot
+# with "non-fatal error on domain 'npu', continuing boot". SMP starts 4 cores normally.
+# Blacklisting ONLY rknpu_init (not rockchip_pm_domain_drv_register) preserves USB power.
+# VOP2/GPU/USB/ISP/Camera/Bluetooth disabled at build-time via DTB patches.
 
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
