@@ -540,6 +540,20 @@
 &i2c0 {
 	status = "okay";
 
+	/* CN3705: standalone 2S Li-Ion charger IC (no host-side control) */
+	cn3705: cn3705@1c {
+		compatible = "cellwise,cn3705";
+		reg = <0x1c>;
+		status = "okay";
+	};
+
+	/* SC8886: buck-boost battery charger/regulator */
+	sc8886: sc8886@6b {
+		compatible = "silergy,sc8886";
+		reg = <0x6b>;
+		status = "okay";
+	};
+
 	husb0: husb311@4e {
 		compatible = "hynetek,husb311";
 		reg = <0x4e>;
