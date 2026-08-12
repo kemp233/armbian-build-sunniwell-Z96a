@@ -296,3 +296,94 @@ POWDSVC
 systemctl enable power-debug.service || true
 
 # End of script
+
+# === v34: Live hardware extraction (update-motd.d + /boot/) ===
+# This runs at boot, extracts live FDT/GPIO/IOMUX/PWM/clocks/PD/USB/regulators
+# Output goes to /etc/motd and /boot/ files
+
+mkdir -p /etc/update-motd.d
+cat > /etc/update-motd.d/99-live-extract <<'MOTDEOF'
+#!/bin/bash
+# v34 - Live hardware extraction (runs at every boot via update-motd.d)
+MARKER=/tmp/.extract_done
+OUT=/root/v34_extract.txt
+BOOT=/boot
+
+if [ -f "$MARKER" ]; then
+    [ -f "$OUT" ] && cat "$OUT"
+    exit 0
+fi
+
+{
+    echo ""
+    echo "=========================================="
+    echo " v34 LIVE HARDWARE EXTRACTION"
+    echo "=========================================="
+
+    # 1. Live FDT -> base64
+    if [ -f /sys/firmware/fdt ]; then
+        cp /sys/firmware/fdt "$BOOT/v2_real_live.dtb"
+        sz=$(stat -c%s /sys/firmware/fdt)
+        echo "FDT: ${sz} bytes"
+        echo "---BEGIN FDT BASE64---"
+        base64 /sys/firmware/fdt
+        echo "---END FDT BASE64---"
+    fi
+
+    # 2. GPIO
+    echo "=== GPIO ==="
+    cat /sys/kernel/debug/gpio > "$BOOT/v2_gpio_live.txt"
+    cat /sys/kernel/debug/gpio
+
+    # 3. IOMUX
+    echo "=== IOMUX ==="
+    cat /sys/kernel/debug/pinctrl/*/pinmux-pins > "$BOOT/v2_iomux_live.txt" 2>/dev/null
+    cat /sys/kernel/debug/pinctrl/*/pinmux-pins 2>/dev/null
+
+    # 4. PWM
+    echo "=== PWM ==="
+    cat /sys/kernel/debug/pwm > "$BOOT/v2_pwm_live.txt"
+    cat /sys/kernel/debug/pwm
+
+    # 5. Clocks
+    echo "=== CLOCKS (USB/PWM/eDP) ==="
+    grep -iE "pwm|pipe|usb|edp|vop" /sys/kernel/debug/clk/clk_summary > "$BOOT/v2_clk_live.txt"
+    grep -iE "pwm|pipe|usb|edp|vop" /sys/kernel/debug/clk/clk_summary
+
+    # 6. Power domains
+    echo "=== POWER DOMAINS ==="
+    cat /sys/kernel/debug/pm_genpd/pm_genpd_summary > "$BOOT/v2_pd_live.txt"
+    cat /sys/kernel/debug/pm_genpd/pm_genpd_summary
+
+    # 7. USB topology
+    echo "=== USB TOPOLOGY ==="
+    for dev in /sys/bus/usb/devices/*/; do
+        [ -f "$dev/speed" ] && echo "$(basename $dev): speed=$(cat $dev/speed) vid=$(cat $dev/idVendor 2>/dev/null) pid=$(cat $dev/idProduct 2>/dev/null)"
+    done
+
+    # 8. Regulators
+    echo "=== REGULATORS ==="
+    for r in /sys/class/regulator/*/; do
+        [ -d "$r" ] || continue
+        name=$(cat "$r/name" 2>/dev/null)
+        if echo "$name" | grep -qiE "usb|vbus|otg|host|lcd|vcc5v0|vcc3v3|pipe"; then
+            echo "$(basename $r): $name uV=$(cat $r/microvolts 2>/dev/null) state=$(cat $r/state 2>/dev/null)"
+        fi
+    done
+
+    # 9. dmesg
+    echo "=== DMESG ==="
+    dmesg | grep -iE "usb|dwc3|drm|edp|panel|backlight|pwm|pipe|power.domain|pm_genpd|phy|vbus|husb|rockchip_drm|vop" | tail -200
+
+    echo "=========================================="
+    echo " v34 EXTRACTION COMPLETE"
+    echo "=========================================="
+} > $OUT 2>&1
+
+cat $OUT
+touch $MARKER
+sync
+MOTDEOF
+
+chmod 755 /etc/update-motd.d/99-live-extract
+echo "Live extraction script added to /etc/update-motd.d/99-live-extract"
