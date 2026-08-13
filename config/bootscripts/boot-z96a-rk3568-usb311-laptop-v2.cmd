@@ -48,11 +48,46 @@ load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfil
 fdt addr ${fdt_addr_r}
 fdt resize 65536
 
-# === FIX: Only blacklist NPU driver initcall (preserves power domain driver for USB) ===
-# Root cause: NPU power domain ACK failure corrupts PMU state, but kernel continues boot
-# with "non-fatal error on domain 'npu', continuing boot". SMP starts 4 cores normally.
-# Blacklisting ONLY rknpu_init (not rockchip_pm_domain_drv_register) preserves USB power.
-# VOP2/GPU/USB/ISP/Camera/Bluetooth disabled at build-time via DTB patches.
+# === INVASIVE HARDWARE FIX: Force pinmux and PMU registers via masked writes ===
+# RK3568 GRF/PMU physical register manipulation BEFORE kernel boot
+# Using mw.l with high 16-bit mask: mw.l <addr> <mask><value> where mask=upper 16 bits, value=lower 16 bits
+
+echo "=== INVASIVE HARDWARE FIX: Forcing pinmux and PMU registers ==="
+
+# 1. Force I2C0 M0 pinmux (SCL=GPIO0_B1, SDA=GPIO0_B2, Func 1 = I2C)
+# Register: 0xfdc20004 (GRF_GPIO0B_IOMUX_L)
+# Bits [7:4] = B1 (SCL), bits [11:8] = B2 (SDA)
+# Mask 0x0ff0 (bits 15:4), Value 0x0110 (Func 1 for both)
+echo "--- FORCING I2C0 M0 PINMUX ---"
+mw.l 0xfdc20004 0x0ff00110
+
+# 2. Force vcc3v3_lcd0_n (GPIO0 PC7) HIGH via GRF
+# GPIO0C_IOMUX_H (0xfd4000e8): PC7 = Func 0 (GPIO)
+# GPIO0C_DRV (0xfd400188): PC7 drive strength max
+# GPIO0_SWPORTA_DR (0xfd400000): PC7 output HIGH
+echo "--- FORCING vcc3v3_lcd0_n (GPIO0 PC7) HIGH ---"
+mw.l 0xfd4000e8 0xffff0000
+mw.l 0xfd400188 0x0000ff00
+mw.l 0xfd400000 0x00ff0080
+
+# 3. Force NPU PMU power domain register (disable NPU power domain handshake)
+# PMU_NPU_PWRDN_CON (0xfdd90018): bits to force NPU domain ON/acknowledged
+# Mask 0x00c0, Value 0x00c0 (force power domain active)
+echo "--- FORCING NPU PMU POWER DOMAIN ---"
+mw.l 0xfdd90018 0x00c000c0
+
+# 4. Ensure USB/CORE PMU power domains stay active
+# PMU_CORE_PWRDN_CON (0xfdd90000) - ensure core domains stay on
+echo "--- ENSURING USB/CORE PMU DOMAINS ACTIVE ---"
+mw.l 0xfdd90000 0x00000000
+
+# === CRITICAL BOOTARGS: Blacklist NPU initcall, limit to 1 CPU, enable panic ===
+# Root cause: NPU power domain ACK failure in rockchip_pm_domain_drv_register
+# Blacklisting rockchip_pm_domain_drv_register prevents the PM domain driver from
+# probing NPU domain, but preserves other domains (USB, GPU, VOP, etc.)
+# maxcpus=1 + nosmp prevents CPU1-3 hang at cpuidle when fbcon takes over
+setenv bootargs "${bootargs} initcall_blacklist=rockchip_pm_domain_drv_register maxcpus=1 nosmp panic=10"
+echo "Bootargs updated: ${bootargs}"
 
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
