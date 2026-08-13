@@ -41,65 +41,19 @@ setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs
 
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1"; fi
 
-# === GPIO DEBUG: Scan all GPIO banks for input pins (power button detection) ===
-echo "=== GPIO DEBUG: Scanning all banks for input pins ==="
-
-# GPIO0 (Bank 0): A0-A31
-for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input A${pin}; then
-        echo "GPIO0_A${pin} = HIGH"
-    else
-        echo "GPIO0_A${pin} = LOW"
-    fi
-done
-
-# GPIO1 (Bank 1): B0-B31
-for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input B${pin}; then
-        echo "GPIO1_B${pin} = HIGH"
-    else
-        echo "GPIO1_B${pin} = LOW"
-    fi
-done
-
-# GPIO2 (Bank 2): C0-C31
-for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input C${pin}; then
-        echo "GPIO2_C${pin} = HIGH"
-    else
-        echo "GPIO2_C${pin} = LOW"
-    fi
-done
-
-# GPIO3 (Bank 3): D0-D31
-for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input D${pin}; then
-        echo "GPIO3_D${pin} = HIGH"
-    else
-        echo "GPIO3_D${pin} = LOW"
-    fi
-done
-
-# GPIO4 (Bank 4): E0-E31
-for pin in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31; do
-    if gpio input E${pin}; then
-        echo "GPIO4_E${pin} = HIGH"
-    else
-        echo "GPIO4_E${pin} = LOW"
-    fi
-done
-
-echo "=== GPIO DEBUG DONE ==="
-
-# Simple delay - sleep if available, otherwise the GPIO scan output takes ~3-5 seconds
-sleep 3
-
 load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} ${prefix}uInitrd
 load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
 fdt resize 65536
+
+# === FIX: Only blacklist NPU driver initcall (preserves power domain driver for USB) ===
+# Root cause: NPU power domain ACK failure corrupts PMU state, but kernel continues boot
+# with "non-fatal error on domain 'npu', continuing boot". SMP starts 4 cores normally.
+# Blacklisting ONLY rknpu_init (not rockchip_pm_domain_drv_register) preserves USB power.
+# VOP2/GPU/USB/ISP/Camera/Bluetooth disabled at build-time via DTB patches.
+
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
 		echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay_file}.dtbo"

@@ -254,8 +254,7 @@ on:
         - z96a-rk3568-laptop
         - z96a-rk3568-usb302-laptop
         - z96a-rk3568-usb311-laptop
-        - z96a-rk3568-laptop-new
-        - z96a-rk3568-usb311-laptop-v2
+        - z96a-rk3568-laptop-v2
 jobs:
 
   build:

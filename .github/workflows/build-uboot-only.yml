@@ -25,9 +25,8 @@ on:
         type: choice
         description: 'Board variant'
         options:
-        - z96a-rk3568-laptop-new
-        - z96a-rk3568-usb311-laptop-v2
-        default: 'z96a-rk3568-laptop-new'
+        - z96a-rk3568-laptop-v2
+        default: 'z96a-rk3568-laptop-v2'
       armbian_version:
         description: 'Version override (optional)'
         required: false

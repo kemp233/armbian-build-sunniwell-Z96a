@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: OpenClaw <openclaw@local>
+Date: Thu, 13 Aug 2026 00:00:00 +0000
+Subject: z96a: disable vcc3v3_lcd0_n in PM domain and add violent Mux
+
+This patch:
+1. Disables vcc3v3_lcd0_n regulator references in DTS
+2. Adds violent Mux in rockchip_pm_domain_drv_register: force GPIO0 PC7 high for LCD power
+
+Signed-off-by: OpenClaw <openclaw@local>
+---
+ drivers/soc/rockchip/pm_domains.c
+ arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dts
+ 2 files changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/soc/rockchip/pm_domains.c b/drivers/soc/rockchip/pm_domains.c
+index 435102ba6740..newindex 100644
+--- a/drivers/soc/rockchip/pm_domains.c
++++ b/drivers/soc/rockchip/pm_domains.c
+@@ -2454,6 +2454,26 @@ static int __init rockchip_pm_domain_drv_register(void)
+ 
++       /* Violent Mux for Z96A: Force GPIO0 PC7 (vcc3v3_lcd0_n enable) to output high */
++       {
++               void __iomem *grf_base = ioremap(0xfd400000, 0x10000);
++               if (grf_base) {
++                       /* GPIO0C_IOMUX_H (offset 0x00e8): PC7 = GPIO (func 0) */
++                       writel(0xffff0000, grf_base + 0x00e8);
++                       /* GPIO0C_DRV (offset 0x0188): PC7 drive strength max */
++                       writel(0x0000ff00, grf_base + 0x0188);
++                       /* GPIO0_SWPORTA_DR (offset 0x0000): set PC7 high */
++                       writel(readl(grf_base + 0x0000) | (1 << 7), grf_base + 0x0000);
++                       iounmap(grf_base);
++                       pr_info("z96a: violent mux applied - GPIO0 PC7 forced high for vcc3v3_lcd0_n\n");
++               }
++       }
++
+ 	return platform_driver_register(&rockchip_pm_domain_driver);
+ }
+ postcore_initcall(rockchip_pm_domain_drv_register);
+diff --git a/arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dts b/arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dts
+index oldindex..newindex 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dts
+@@ -114,7 +114,7 @@
+ 		default-brightness-level = <200>;
+-		power-supply = <&vcc3v3_lcd0_n>;
++		// power-supply = <&vcc3v3_lcd0_n>;  // disabled: violent mux handles LCD power
+ 	};
+ 
+ 	charge-animation {
+@@ -283,14 +283,6 @@
+ 	};
+ 
+-	vcc3v3_lcd0_n: vcc3v3-lcd0-n {
+-		compatible = "regulator-fixed";
+-		regulator-name = "vcc3v3_lcd0_n";
+-		regulator-boot-on;
+-		regulator-min-microvolt = <3300000>;
+-		regulator-max-microvolt = <3300000>;
+-		enable-active-high;
+-		gpio = <&gpio0 RK_PC7 GPIO_ACTIVE_HIGH>;
+-		vin-supply = <&vcc3v3_sys>;
+-
+-		regulator-state-mem {
+-			regulator-off-in-suspend;
+-		};
+-	};
+-
+ 	z96a_keyboad_vcc: z96a-keyboad-vcc {
+@@ -391,7 +383,7 @@
+ 	compatible = "simple-panel";
+ 	status = "okay";
+-	power-supply = <&vcc3v3_lcd0_n>;
++	// power-supply = <&vcc3v3_lcd0_n>;  // disabled: violent mux handles LCD power
+ 	backlight = <&backlight>;
+ 	enable-gpios = <&gpio3 RK_PA3 GPIO_ACTIVE_HIGH>;
+ 	bus-format = <MEDIA_BUS_FMT_RGB888_1X24>;
