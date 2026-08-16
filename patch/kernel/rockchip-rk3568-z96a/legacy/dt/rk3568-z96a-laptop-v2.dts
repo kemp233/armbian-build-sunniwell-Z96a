@@ -706,14 +706,6 @@
 			phandle = <0x14d>;
 		};
 
-		rknpu {
-			compatible = "shared-dma-pool";
-			inactive;
-			reusable;
-			size = <0x00 0x8000000>;
-			alignment = <0x00 0x1000>;
-			phandle = <0x70>;
-		};
 	};
 
 	rockchip-suspend {
@@ -950,7 +942,7 @@
 			compatible = "snps,dwc3";
 			reg = <0x00 0xfcc00000 0x00 0x400000>;
 			interrupts = <0x00 0xa9 0x04>;
-			dr_mode = "otg";
+			dr_mode = "host";
 			phys = <0x28 0x24 0x04>;
 			phy-names = "usb2-phy\0usb3-phy";
 			phy_type = "utmi_wide";
@@ -969,7 +961,6 @@
 			snps,parkmode-disable-ss-quirk;
 			quirk-skip-phy-init;
 			status = "okay";
-			usb-role-switch;
 			phandle = <0x164>;
 
 			port {
@@ -1370,10 +1361,10 @@
 			reg = <0x4e>;
 			pinctrl-names = "default";
 			pinctrl-0 = <0x3f>;
-			vbus-supply = <0x112>;
+			vbus-supply = <0x40>;
 			interrupt-parent = <0x41>;
 			interrupts = <0x1d 0x08>;
-			status = "okay";
+			status = "disabled";
 			phandle = <0x177>;
 
 			ports {
@@ -1471,7 +1462,7 @@
 			phandle = <0x137>;
 
 			pwrkey {
-				status = "disabled";
+				status = "okay";
 			};
 
 			pinctrl_rk8xx {
@@ -1809,11 +1800,6 @@
 			status = "okay";
 			phandle = <0x25>;
 
-			pd_npu@6 {
-				reg = <0x06>;
-				clocks = <0x23 0x27 0x23 0x25 0x23 0x26>;
-				pm_qos = <0x53>;
-			};
 
 			pd_gpu@7 {
 				reg = <0x07>;
@@ -1881,172 +1867,10 @@
 		};
 	};
 
-	npu@fde40000 {
-		compatible = "rockchip,rk3568-rknpu\0rockchip,rknpu";
-		reg = <0x00 0xfde40000 0x00 0x10000>;
-		interrupts = <0x00 0x97 0x04>;
-		clocks = <0x02 0x02 0x23 0x23 0x23 0x28 0x23 0x29>;
-		clock-names = "scmi_clk\0clk\0aclk\0hclk";
-		assigned-clocks = <0x23 0x23>;
-		assigned-clock-rates = <0x23c34600>;
-		resets = <0x23 0x2b 0x23 0x2c>;
-		reset-names = "srst_a\0srst_h";
-		power-domains = <0x25 0x06>;
-		operating-points-v2 = <0x6e>;
-		iommus = <0x6f>;
-		status = "okay";
-		memory-region = <0x70>;
-		rknpu-supply = <0x71>;
-		phandle = <0x187>;
-	};
 
-	npu-opp-table {
-		compatible = "operating-points-v2";
-		mbist-vmin = <0xc96a8 0xdbba0 0xe7ef0>;
-		nvmem-cells = <0x72 0x07 0x08 0x73 0x0a 0x0b>;
-		nvmem-cell-names = "leakage\0pvtm\0mbist-vmin\0opp-info\0specification_serial_number\0remark_spec_serial_number";
-		rockchip,supported-hw;
-		rockchip,max-volt = <0xf4240>;
-		rockchip,temp-hysteresis = <0x1388>;
-		rockchip,low-temp = <0x00>;
-		rockchip,low-temp-adjust-volt = <0x00 0x3e8 0xc350>;
-		rockchip,pvtm-voltage-sel = <0x00 0x14820 0x00 0x14821 0x153d8 0x01 0x153d9 0x16378 0x02 0x16379 0x186a0 0x03>;
-		rockchip,pvtm-ch = <0x00 0x05>;
-		phandle = <0x6e>;
 
-		opp-200000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0xbebc200>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
-		};
 
-		opp-300000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0x11b3dc40>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
-		};
 
-		opp-400000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0x17d78400>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
-		};
-
-		opp-600000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0x23c34600>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
-		};
-
-		opp-700000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0x29b92700>;
-			opp-microvolt = <0xd59f8 0xd59f8 0xf4240>;
-			opp-microvolt-L0 = <0xd59f8 0xd59f8 0xf4240>;
-			opp-microvolt-L1 = <0xcf850 0xcf850 0xf4240>;
-			opp-microvolt-L2 = <0xcf850 0xcf850 0xf4240>;
-			opp-microvolt-L3 = <0xcf850 0xcf850 0xf4240>;
-		};
-
-		opp-800000000 {
-			opp-supported-hw = <0xfb 0xffff>;
-			opp-hz = <0x00 0x2faf0800>;
-			opp-microvolt = <0xe1d48 0xe1d48 0xf4240>;
-			opp-microvolt-L0 = <0xe1d48 0xe1d48 0xf4240>;
-			opp-microvolt-L1 = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L2 = <0xd59f8 0xd59f8 0xf4240>;
-			opp-microvolt-L3 = <0xd59f8 0xd59f8 0xf4240>;
-		};
-
-		opp-900000000 {
-			opp-supported-hw = <0xf9 0xffff>;
-			opp-hz = <0x00 0x35a4e900>;
-			opp-microvolt = <0xee098 0xee098 0xf4240>;
-			opp-microvolt-L0 = <0xee098 0xee098 0xf4240>;
-			opp-microvolt-L1 = <0xe7ef0 0xe7ef0 0xf4240>;
-			opp-microvolt-L2 = <0xe1d48 0xe1d48 0xf4240>;
-			opp-microvolt-L3 = <0xdbba0 0xdbba0 0xf4240>;
-		};
-
-		opp-1000000000 {
-			opp-supported-hw = <0xf9 0xffff>;
-			opp-hz = <0x00 0x3b9aca00>;
-			opp-microvolt = <0xf4240 0xf4240 0xf4240>;
-			opp-microvolt-L0 = <0xf4240 0xf4240 0xf4240>;
-			opp-microvolt-L1 = <0xee098 0xee098 0xf4240>;
-			opp-microvolt-L2 = <0xe7ef0 0xe7ef0 0xf4240>;
-			opp-microvolt-L3 = <0xe1d48 0xe1d48 0xf4240>;
-			status = "disabled";
-		};
-
-		opp-j-600000000 {
-			opp-supported-hw = <0x04 0xffff>;
-			opp-hz = <0x00 0x23c34600>;
-			opp-microvolt = <0xdbba0 0xdbba0 0xf4240>;
-		};
-
-		opp-m-900000000 {
-			opp-supported-hw = <0x02 0xffff>;
-			opp-hz = <0x00 0x35a4e900>;
-			opp-microvolt = <0xe1d48 0xe1d48 0xf4240>;
-		};
-	};
-
-	bus-npu {
-		compatible = "rockchip,rk3568-bus";
-		rockchip,busfreq-policy = "clkfreq";
-		clocks = <0x02 0x02>;
-		clock-names = "bus";
-		operating-points-v2 = <0x74>;
-		status = "okay";
-		bus-supply = <0x75>;
-		pvtm-supply = <0x05>;
-		phandle = <0x188>;
-	};
-
-	bus-npu-opp-table {
-		compatible = "operating-points-v2";
-		opp-shared;
-		nvmem-cells = <0x07>;
-		nvmem-cell-names = "pvtm";
-		rockchip,pvtm-voltage-sel = <0x00 0x14820 0x00 0x14821 0x16378 0x01 0x16379 0x186a0 0x02>;
-		rockchip,pvtm-ch = <0x00 0x05>;
-		phandle = <0x74>;
-
-		opp-700000000 {
-			opp-hz = <0x00 0x29b92700>;
-			opp-microvolt = <0xdbba0>;
-			opp-microvolt-L0 = <0xdbba0>;
-			opp-microvolt-L1 = <0xd59f8>;
-			opp-microvolt-L2 = <0xd59f8>;
-		};
-
-		opp-900000000 {
-			opp-hz = <0x00 0x35a4e900>;
-			opp-microvolt = <0xdbba0>;
-		};
-
-		opp-1000000000 {
-			opp-hz = <0x00 0x3b9aca00>;
-			opp-microvolt = <0xe7ef0>;
-			opp-microvolt-L0 = <0xe7ef0>;
-			opp-microvolt-L1 = <0xe1d48>;
-			opp-microvolt-L2 = <0xdbba0>;
-		};
-	};
-
-	iommu@fde4b000 {
-		compatible = "rockchip,iommu-v2";
-		reg = <0x00 0xfde4b000 0x00 0x40>;
-		interrupts = <0x00 0x97 0x04>;
-		interrupt-names = "rknpu_mmu";
-		clocks = <0x23 0x28 0x23 0x29>;
-		clock-names = "aclk\0iface";
-		power-domains = <0x25 0x06>;
-		#iommu-cells = <0x00>;
-		status = "okay";
-		phandle = <0x6f>;
-	};
 
 	gpu@fde60000 {
 		compatible = "arm,mali-bifrost";
@@ -2161,21 +1985,6 @@
 		};
 	};
 
-	pvtm@fde90000 {
-		compatible = "rockchip,rk3568-npu-pvtm";
-		reg = <0x00 0xfde90000 0x00 0x100>;
-		#address-cells = <0x01>;
-		#size-cells = <0x00>;
-
-		pvtm@2 {
-			reg = <0x02>;
-			clocks = <0x23 0x2b 0x23 0x2a 0x23 0x25>;
-			clock-names = "clk\0pclk\0hclk";
-			resets = <0x23 0x2e 0x23 0x2d>;
-			reset-names = "rts\0rst-p";
-			thermal-zone = "soc-thermal";
-		};
-	};
 
 	vdpu@fdea0400 {
 		compatible = "rockchip,vpu-decoder-v2";
@@ -3453,7 +3262,7 @@
 		compatible = "rockchip,rk3568-dw-mshc\0rockchip,rk3288-dw-mshc";
 		reg = <0x00 0xfe2c0000 0x00 0x4000>;
 		interrupts = <0x00 0x63 0x04>;
-		max-frequency = <0xbebc200>;
+		max-frequency = <0x5f5e100>;
 		clocks = <0x23 0xb2 0x23 0xb3 0x23 0x18c 0x23 0x18d>;
 		clock-names = "biu\0ciu\0ciu-drive\0ciu-sample";
 		fifo-depth = <0x100>;
@@ -3471,7 +3280,7 @@
 		non-removable;
 		pinctrl-names = "default";
 		pinctrl-0 = <0xbd 0xbe 0xbf>;
-		sd-uhs-sdr104;
+		sd-uhs-sdr50;
 		phandle = <0x1b0>;
 	};
 
@@ -5889,13 +5698,6 @@
 			};
 		};
 
-		npu {
-
-			npu-pins {
-				rockchip,pins = <0x00 0x11 0x02 0x116>;
-				phandle = <0x294>;
-			};
-		};
 
 		pcie20 {
 
@@ -7406,7 +7208,7 @@
 		BT,reset_gpio = <0x41 0x11 0x00>;
 		BT,wake_gpio = <0x41 0x0e 0x00>;
 		BT,host_wake_irq = <0x41 0x14 0x00>;
-		status = "okay";
+		status = "disabled";
 		phandle = <0x322>;
 	};
 
@@ -7512,7 +7314,6 @@
 		drm_logo = "/reserved-memory/drm-logo@00000000";
 		drm_cubic_lut = "/reserved-memory/drm-cubic-lut@00000000";
 		ramoops = "/reserved-memory/ramoops@110000";
-		rknpu_reserved = "/reserved-memory/rknpu";
 		rockchip_suspend = "/rockchip-suspend";
 		rockchip_system_monitor = "/rockchip-system-monitor";
 		thermal_zones = "/thermal-zones";
@@ -7612,11 +7413,6 @@
 		pwm3 = "/pwm@fdd70030";
 		pmu = "/power-management@fdd90000";
 		power = "/power-management@fdd90000/power-controller";
-		rknpu = "/npu@fde40000";
-		npu_opp_table = "/npu-opp-table";
-		bus_npu = "/bus-npu";
-		bus_npu_opp_table = "/bus-npu-opp-table";
-		rknpu_mmu = "/iommu@fde4b000";
 		gpu = "/gpu@fde60000";
 		gpu_power_model = "/gpu@fde60000/power-model";
 		gpu_opp_table = "/opp-table2";
@@ -8052,7 +7848,6 @@
 		jtag_pins = "/pinctrl/jtag/jtag-pins";
 		lcdc_ctl = "/pinctrl/lcdc/lcdc-ctl";
 		mcu_pins = "/pinctrl/mcu/mcu-pins";
-		npu_pins = "/pinctrl/npu/npu-pins";
 		pcie20m0_pins = "/pinctrl/pcie20/pcie20m0-pins";
 		pcie20m1_pins = "/pinctrl/pcie20/pcie20m1-pins";
 		pcie20m2_pins = "/pinctrl/pcie20/pcie20m2-pins";
