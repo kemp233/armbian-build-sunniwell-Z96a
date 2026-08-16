@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Z96A <z96a@local>
+Date: Sun, 16 Aug 2026 12:50:00 +0000
+Subject: [PATCH] cpufreq: rockchip: add rk3568 to of_match table
+
+The rockchip_cpufreq_of_match table is missing "rockchip,rk3568".
+Without this, rockchip_cpufreq_do_init() fails to match the root
+compatible and cpufreq never registers.
+
+Add rk3568 with empty opp_data (no special soc info needed —
+the OPP table in DTB already has pvtm/nvmem handled by the
+generic rockchip_opp_select framework).
+
+Signed-off-by: Z96A <z96a@local>
+---
+ drivers/cpufreq/rockchip-cpufreq.c | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/drivers/cpufreq/rockchip-cpufreq.c b/drivers/cpufreq/rockchip-cpufreq.c
+index 1111111..2222222 100644
+--- a/drivers/cpufreq/rockchip-cpufreq.c
++++ b/drivers/cpufreq/rockchip-cpufreq.c
+@@ -420,6 +420,11 @@ static const struct rockchip_opp_data rk3576_cpu_opp_data = {
+ 	.config_regulators = cpu_opp_config_regulators,
+ };
+ 
++static const struct rockchip_opp_data rk3568_cpu_opp_data = {
++	/* rk3568: no special soc info / read margin needed */
++};
++
+ static const struct rockchip_opp_data rv1126_cpu_opp_data = {
+ 	.get_soc_info = rv1126_get_soc_info,
+ };
+@@ -440,6 +445,11 @@ static const struct of_device_id rockchip_cpufreq_of_match[] = {
+ 		.data = (void *)&rk3576_cpu_opp_data,
+ 	},
+ 	{
++		.compatible = "rockchip,rk3568",
++		.data = (void *)&rk3568_cpu_opp_data,
++	},
++	{
+ 		.compatible = "rockchip,rk3588",
+ 		.data = (void *)&rk3588_cpu_opp_data,
+ 	},
+-- 
+2.25.1
