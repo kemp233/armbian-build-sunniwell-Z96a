@@ -72,6 +72,30 @@ function create_new_rootfs_cache_via_debootstrap() {
 		"'--components=${AGGREGATED_DEBOOTSTRAP_COMPONENTS_COMMA}'" # from aggregation.py
 	)
 
+	# Host images (esp. GHA Ubuntu) often ship a stale debian-archive-keyring that
+	# cannot verify current bookworm/trixie Release signatures (e.g. F8D2585B8783D481).
+	# Refresh keyring and always pass it explicitly to debootstrap.
+	if [[ "${RELEASE}" == "bookworm" || "${RELEASE}" == "trixie" || "${RELEASE}" == "sid" || "${RELEASE}" == "bullseye" ]]; then
+		display_alert "Refreshing Debian archive keyring" "debootstrap ${RELEASE}" "info"
+		run_host_command_logged apt-get -y -qq update "||" true
+		run_host_command_logged apt-get -y -qq install --reinstall debian-archive-keyring ca-certificates curl gnupg "||" true
+		declare debian_keyring_file="/usr/share/keyrings/debian-archive-keyring.gpg"
+		if [[ ! -s "${debian_keyring_file}" && -s /etc/apt/trusted.gpg.d/debian-archive-bookworm-stable.gpg ]]; then
+			debian_keyring_file="/etc/apt/trusted.gpg.d/debian-archive-bookworm-stable.gpg"
+		fi
+		# Fallback: build a fresh keyring with current Debian archive signing keys
+		if [[ ! -s "${debian_keyring_file}" ]] || ! gpg --batch --no-default-keyring --keyring "${debian_keyring_file}" --list-keys "F8D2585B8783D481" > /dev/null 2>&1; then
+			display_alert "Building fresh Debian keyring" "archive-key-12 + archive-key-11" "wrn"
+			debian_keyring_file="/tmp/debian-archive-keyring-fresh.gpg"
+			run_host_command_logged rm -f "${debian_keyring_file}" "${debian_keyring_file}~"
+			run_host_command_logged curl -fsSL "https://ftp-master.debian.org/keys/archive-key-12.asc" -o /tmp/debian-archive-key-12.asc
+			run_host_command_logged curl -fsSL "https://ftp-master.debian.org/keys/archive-key-11.asc" -o /tmp/debian-archive-key-11.asc "||" true
+			run_host_command_logged gpg --batch --no-default-keyring --keyring "${debian_keyring_file}" --import /tmp/debian-archive-key-12.asc
+			run_host_command_logged gpg --batch --no-default-keyring --keyring "${debian_keyring_file}" --import /tmp/debian-archive-key-11.asc "||" true
+		fi
+		deboostrap_arguments+=("--keyring=${debian_keyring_file}")
+	fi
+
 	# Hacking debootstrap to support future releases as symlink is often the only change, so we don't need to bump host OS
 	# This functionality is coming with debootstrap v1.0.128 (Mantic)
 	local debootstrap_home="/usr/share/debootstrap/scripts"
