@@ -1,2 +1,24 @@
-# Z96A edge (6.1): board DTS lives in kemp233/linux-rockchip (rk-6.1-rkr5.1).
-# Keep this dir for future kernel patches; no series required for initial bring-up.
+config:
+
+  # Just some info stuff; not used by the patching scripts
+  name: rockchip-rk3568-z96a-edge
+  kind: kernel
+  type: vendor
+  branch: rk-6.1-rkr5.1
+  last-known-good-tag: v6.1.75
+
+  # Board DTS lives in kemp233/linux-rockchip (rk-6.1-rkr5.1).
+  # Optional local dt/ overrides can still be dropped here later.
+  dts-directories:
+    - { source: "dt", target: "arch/arm64/boot/dts/rockchip" }
+
+  # incremental: only append any local dt/*.dts into existing Makefile
+  auto-patch-dt-makefile:
+    - { incremental: true, directory: "arch/arm64/boot/dts/rockchip", config-var: "CONFIG_ARCH_ROCKCHIP" }
+
+  patches-to-git:
+    do-not-commit-files:
+      - "MAINTAINERS"
+      - "Documentation/devicetree/bindings/arm/rockchip.yaml"
+    do-not-commit-regexes:
+      - "^arch/([a-zA-Z0-9]+)/boot/dts/([a-zA-Z0-9]+)/Makefile$"
