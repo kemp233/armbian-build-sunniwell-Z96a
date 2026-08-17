@@ -366,7 +366,7 @@
 			cpu-idle-states = <0x04>;
 			#cooling-cells = <0x02>;
 			dynamic-power-coefficient = <0xbb>;
-			cpu-supply = <0x05>;
+			cpu-supply = <0x75>;
 			phandle = <0x0c>;
 		};
 
@@ -1412,24 +1412,7 @@
 			};
 		};
 
-		syr837@40 {
-			compatible = "silergy,syr827";
-			reg = <0x40>;
-			vin-supply = <0x44>;
-			regulator-compatible = "fan53555-reg";
-			regulator-name = "vdd_cpu";
-			regulator-min-microvolt = <0xadf34>;
-			regulator-max-microvolt = <0x1535b0>;
-			regulator-ramp-delay = <0x8fc>;
-			fcs,suspend-voltage-selector = <0x01>;
-			regulator-always-on;
-			regulator-initial-state = <0x03>;
-			phandle = <0x05>;
-
-			regulator-state-mem {
-				regulator-off-in-suspend;
-			};
-		};
+		
 
 		pmic@20 {
 			compatible = "rockchip,rk809";
@@ -7383,7 +7366,7 @@
 		usbc0_role_switch = "/i2c@fdd40000/husb311@4e/ports/port@0/endpoint@0";
 		usb_con = "/i2c@fdd40000/husb311@4e/connector";
 		usb_ss_con = "/i2c@fdd40000/husb311@4e/connector/ports/port@0/endpoint";
-		vdd_cpu = "/i2c@fdd40000/syr837@40";
+		
 		rk809 = "/i2c@fdd40000/pmic@20";
 		pinctrl_rk8xx = "/i2c@fdd40000/pmic@20/pinctrl_rk8xx";
 		rk809_slppin_null = "/i2c@fdd40000/pmic@20/pinctrl_rk8xx/rk809_slppin_null";
