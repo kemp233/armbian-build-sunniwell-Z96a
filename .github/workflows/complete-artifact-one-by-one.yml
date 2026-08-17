@@ -9,6 +9,7 @@ on:
         required: false
         options:
         - kernel
+        - kernel-6.1
         - build
         default: build
 
@@ -332,11 +333,21 @@ jobs:
           # go to build folder
           cd build
 
+          # Map armbian_target:
+          #   kernel / build  -> pass-through, BRANCH from armbian_kernel_branch
+          #   kernel-6.1      -> compile kernel only from kemp233/linux-rockchip rk-6.1-rkr5.1 (family edge)
+          BUILD_TARGET="${{ inputs.armbian_target }}"
+          BUILD_BRANCH="${{ inputs.armbian_kernel_branch }}"
+          if [[ "${BUILD_TARGET}" == "kernel-6.1" ]]; then
+            BUILD_TARGET="kernel"
+            BUILD_BRANCH="edge"
+          fi
+
           # execute build command
-          ./compile.sh "${{ inputs.armbian_target }}" \
+          ./compile.sh "${BUILD_TARGET}" \
           REVISION="${{ env.ARMBIAN_VERSION }}" \
           BOARD="${{ inputs.armbian_board }}" \
-          BRANCH="${{ inputs.armbian_kernel_branch }}" \
+          BRANCH="${BUILD_BRANCH}" \
           RELEASE="${{ inputs.armbian_release }}" \
           KERNEL_CONFIGURE="no" \
           BUILD_DESKTOP="${BUILD_DESKTOP}" \

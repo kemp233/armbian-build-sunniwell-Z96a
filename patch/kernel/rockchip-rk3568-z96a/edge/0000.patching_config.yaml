@@ -1,0 +1,2 @@
+# Z96A edge (6.1): board DTS lives in kemp233/linux-rockchip (rk-6.1-rkr5.1).
+# Keep this dir for future kernel patches; no series required for initial bring-up.
