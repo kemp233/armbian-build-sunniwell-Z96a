@@ -13,12 +13,35 @@ else
 fi
 systemctl enable ssh || true
 
-# 3. 彻底杀死 Armbian 首次运行向导（防止它占领串口）
+# 3. 彻底关闭 Armbian 首次运行 / 首次登录向导（防止占领串口、卡 Create root password）
+# systemd units
+systemctl disable --now armbian-firstrun.service armbian-firstrun-config.service 2>/dev/null || true
 systemctl mask armbian-firstrun.service || true
 systemctl mask armbian-firstrun-config.service || true
-# 关键：创建一个标志文件，告诉 Armbian 配置已完成
-touch /root/.not_configured
-rm -f /root/.not_configured
+rm -f /etc/systemd/system/multi-user.target.wants/armbian-firstrun.service \
+       /etc/systemd/system/multi-user.target.wants/armbian-firstrun-config.service \
+       /lib/systemd/system/multi-user.target.wants/armbian-firstrun.service \
+       /lib/systemd/system/multi-user.target.wants/armbian-firstrun-config.service 2>/dev/null || true
+
+# firstlogin is triggered by profile.d + /root/.not_logged_in_yet (not only systemd)
+rm -f /root/.not_logged_in_yet /root/.not_logged_in_yet.network 2>/dev/null || true
+mkdir -p /etc/profile.d/disabled
+for f in /etc/profile.d/armbian-check-first-login.sh \
+         /etc/profile.d/armbian-check-first-login-reboot.sh; do
+  if [ -e "$f" ]; then
+    mv -f "$f" /etc/profile.d/disabled/ 2>/dev/null || rm -f "$f" || true
+  fi
+done
+# belt-and-suspenders: neutralize scripts if they get reinstalled later
+if [ -x /usr/lib/armbian/armbian-firstlogin ]; then
+  chmod a-x /usr/lib/armbian/armbian-firstlogin 2>/dev/null || true
+fi
+if [ -x /usr/lib/armbian/armbian-firstrun ]; then
+  chmod a-x /usr/lib/armbian/armbian-firstrun 2>/dev/null || true
+fi
+if [ -x /usr/lib/armbian/armbian-firstrun-config ]; then
+  chmod a-x /usr/lib/armbian/armbian-firstrun-config 2>/dev/null || true
+fi
 
 # === 无线网络：更可靠的方法 ===
 
