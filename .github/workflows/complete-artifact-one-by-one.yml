@@ -357,7 +357,6 @@ jobs:
           RELEASE="${{ inputs.armbian_release }}" \
           KERNEL_CONFIGURE="${FORCE_KERNEL_REBUILD}" \
           ARTIFACT_IGNORE_CACHE="${FORCE_KERNEL_REBUILD}" \
-          CLEAN_LEVEL="sources" \
           BUILD_DESKTOP="${BUILD_DESKTOP}" \
           BUILD_MINIMAL="${BUILD_MINIMAL}" \
           DESKTOP_ENVIRONMENT="${DESKTOP_ENVIRONMENT}" \
