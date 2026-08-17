@@ -355,7 +355,7 @@ jobs:
           BOARD="${{ inputs.armbian_board }}" \
           BRANCH="${BUILD_BRANCH}" \
           RELEASE="${{ inputs.armbian_release }}" \
-          KERNEL_CONFIGURE="${FORCE_KERNEL_REBUILD}" \
+          KERNEL_CONFIGURE="no" \
           ARTIFACT_IGNORE_CACHE="${FORCE_KERNEL_REBUILD}" \
           BUILD_DESKTOP="${BUILD_DESKTOP}" \
           BUILD_MINIMAL="${BUILD_MINIMAL}" \
