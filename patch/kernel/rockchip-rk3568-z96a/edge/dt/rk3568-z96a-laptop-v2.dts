@@ -1361,6 +1361,7 @@
 			reg = <0x4e>;
 			pinctrl-names = "default";
 			pinctrl-0 = <0x3f>;
+			/* vcc5v0_usb (0x112): known-good VBUS rail on V2 */
 			vbus-supply = <0x112>;
 			interrupt-parent = <0x41>;
 			interrupts = <0x1d 0x08>;
@@ -1412,7 +1413,6 @@
 			};
 		};
 
-		
 
 		pmic@20 {
 			compatible = "rockchip,rk809";
@@ -7368,7 +7368,6 @@
 		usbc0_role_switch = "/i2c@fdd40000/husb311@4e/ports/port@0/endpoint@0";
 		usb_con = "/i2c@fdd40000/husb311@4e/connector";
 		usb_ss_con = "/i2c@fdd40000/husb311@4e/connector/ports/port@0/endpoint";
-		
 		rk809 = "/i2c@fdd40000/pmic@20";
 		pinctrl_rk8xx = "/i2c@fdd40000/pmic@20/pinctrl_rk8xx";
 		rk809_slppin_null = "/i2c@fdd40000/pmic@20/pinctrl_rk8xx/rk809_slppin_null";
