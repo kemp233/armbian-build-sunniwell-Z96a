@@ -338,9 +338,15 @@ jobs:
           #   kernel-6.1      -> compile kernel only from kemp233/linux-rockchip rk-6.1-rkr5.1 (family edge)
           BUILD_TARGET="${{ inputs.armbian_target }}"
           BUILD_BRANCH="${{ inputs.armbian_kernel_branch }}"
+          FORCE_KERNEL_REBUILD="no"
           if [[ "${BUILD_TARGET}" == "kernel-6.1" ]]; then
             BUILD_TARGET="kernel"
             BUILD_BRANCH="edge"
+            FORCE_KERNEL_REBUILD="yes"
+          elif [[ "${BUILD_BRANCH}" == "edge" ]]; then
+            # Edge must consume the current kemp233/linux-rockchip DTS/kernel,
+            # never a stale 6.1 artifact from the remote cache.
+            FORCE_KERNEL_REBUILD="yes"
           fi
 
           # execute build command
@@ -349,7 +355,9 @@ jobs:
           BOARD="${{ inputs.armbian_board }}" \
           BRANCH="${BUILD_BRANCH}" \
           RELEASE="${{ inputs.armbian_release }}" \
-          KERNEL_CONFIGURE="no" \
+          KERNEL_CONFIGURE="${FORCE_KERNEL_REBUILD}" \
+          ARTIFACT_IGNORE_CACHE="${FORCE_KERNEL_REBUILD}" \
+          CLEAN_LEVEL="sources" \
           BUILD_DESKTOP="${BUILD_DESKTOP}" \
           BUILD_MINIMAL="${BUILD_MINIMAL}" \
           DESKTOP_ENVIRONMENT="${DESKTOP_ENVIRONMENT}" \
@@ -385,7 +393,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: "packages-${{ inputs.armbian_board }}-${{ inputs.armbian_kernel_branch }}"
+          name: "packages-${{ inputs.armbian_board }}-${{ inputs.armbian_target == 'kernel-6.1' && 'edge' || inputs.armbian_kernel_branch }}"
           path: |
             build/output/packages-hashed/
             build/output/images/*
