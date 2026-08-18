@@ -361,7 +361,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x00>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			#cooling-cells = <0x02>;
@@ -375,7 +375,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x100>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0d>;
@@ -386,7 +386,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x200>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0e>;
@@ -397,7 +397,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x300>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0f>;
@@ -778,6 +778,20 @@
 			polling-delay = <0x3e8>;
 			thermal-sensors = <0x1f 0x01>;
 			phandle = <0x154>;
+
+			trips {
+				gpu-alert {
+					temperature = <0x14c08>;
+					hysteresis = <0x7d0>;
+					type = "passive";
+				};
+
+				gpu-crit {
+					temperature = <0x1c138>;
+					hysteresis = <0x7d0>;
+					type = "critical";
+				};
+			};
 		};
 	};
 
@@ -1498,8 +1512,6 @@
 				};
 
 				DCDC_REG2 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x7a120>;
 					regulator-max-microvolt = <0x149970>;
 					regulator-init-microvolt = <0xcf850>;
@@ -1514,8 +1526,6 @@
 				};
 
 				DCDC_REG3 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-initial-mode = <0x02>;
 					regulator-name = "vcc_ddr";
 					phandle = <0x17b>;
@@ -1526,8 +1536,6 @@
 				};
 
 				DCDC_REG4 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x325aa0>;
 					regulator-max-microvolt = <0x325aa0>;
 					regulator-initial-mode = <0x02>;
@@ -1541,8 +1549,6 @@
 				};
 
 				LDO_REG1 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
 					regulator-name = "vcca1v8_pmu";
@@ -1555,8 +1561,6 @@
 				};
 
 				LDO_REG2 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0xdbba0>;
 					regulator-max-microvolt = <0xdbba0>;
 					regulator-name = "vdda_0v9";
@@ -1568,8 +1572,6 @@
 				};
 
 				LDO_REG3 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0xdbba0>;
 					regulator-max-microvolt = <0xdbba0>;
 					regulator-name = "vdda0v9_pmu";
@@ -1582,8 +1584,6 @@
 				};
 
 				LDO_REG4 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x325aa0>;
 					regulator-max-microvolt = <0x325aa0>;
 					regulator-name = "vccio_acodec";
@@ -1595,8 +1595,6 @@
 				};
 
 				LDO_REG5 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x325aa0>;
 					regulator-name = "vccio_sd";
@@ -1608,8 +1606,6 @@
 				};
 
 				LDO_REG6 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x325aa0>;
 					regulator-max-microvolt = <0x325aa0>;
 					regulator-name = "vcc3v3_pmu";
@@ -1622,8 +1618,6 @@
 				};
 
 				LDO_REG7 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
 					regulator-name = "vcc_1v8";
@@ -1635,8 +1629,6 @@
 				};
 
 				LDO_REG8 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
 					regulator-name = "vcc1v8_dvp";
@@ -1648,8 +1640,6 @@
 				};
 
 				LDO_REG9 {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
 					regulator-name = "vcc2v8_dvp";
@@ -1661,8 +1651,6 @@
 				};
 
 				BOOST {
-					regulator-always-on;
-					regulator-boot-on;
 					regulator-min-microvolt = <0x4c4b40>;
 					regulator-max-microvolt = <0x4c4b40>;
 					regulator-name = "boost";

@@ -81,13 +81,8 @@ mw.l 0xfdd90018 0x00c000c0
 echo "--- ENSURING USB/CORE PMU DOMAINS ACTIVE ---"
 mw.l 0xfdd90000 0x00000000
 
-# === CRITICAL BOOTARGS: Blacklist NPU initcall, limit to 1 CPU, enable panic ===
-# Root cause: NPU power domain ACK failure in rockchip_pm_domain_drv_register
-# Blacklisting rockchip_pm_domain_drv_register prevents the PM domain driver from
-# probing NPU domain, but preserves other domains (USB, GPU, VOP, etc.)
-# maxcpus=1 + nosmp prevents CPU1-3 hang at cpuidle when fbcon takes over
-setenv bootargs "${bootargs} initcall_blacklist=rockchip_pm_domain_drv_register maxcpus=1 nosmp panic=10"
-echo "Bootargs updated: ${bootargs}"
+# Keep NPU init blacklisted via armbianEnv extraargs (rknpu_init).
+# Do NOT force cpuidle.off / maxcpus / nosmp here — those pin CPU at full power.
 
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then

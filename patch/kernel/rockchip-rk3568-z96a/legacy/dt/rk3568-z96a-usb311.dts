@@ -687,8 +687,6 @@
 			};
 
 			vdd_gpu: DCDC_REG2 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <500000>;
 				regulator-max-microvolt = <1350000>;
 				regulator-init-microvolt = <850000>;
@@ -701,8 +699,6 @@
 			};
 
 			vcc_ddr: DCDC_REG3 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-initial-mode = <0x2>;
 				regulator-name = "vcc_ddr";
 				regulator-state-mem {
@@ -711,8 +707,6 @@
 			};
 
 			vcc_3v3: DCDC_REG4 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-initial-mode = <0x2>;
@@ -724,8 +718,6 @@
 			};
 
 			vcca1v8_pmu: LDO_REG1 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-name = "vcca1v8_pmu";
@@ -736,8 +728,6 @@
 			};
 
 			vdda_0v9: LDO_REG2 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <900000>;
 				regulator-name = "vdda_0v9";
@@ -747,8 +737,6 @@
 			};
 
 			vdda0v9_pmu: LDO_REG3 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <900000>;
 				regulator-max-microvolt = <900000>;
 				regulator-name = "vdda0v9_pmu";
@@ -759,8 +747,6 @@
 			};
 
 			vccio_acodec: LDO_REG4 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vccio_acodec";
@@ -770,8 +756,6 @@
 			};
 
 			vccio_sd: LDO_REG5 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vccio_sd";
@@ -781,8 +765,6 @@
 			};
 
 			vcc3v3_pmu: LDO_REG6 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
 				regulator-name = "vcc3v3_pmu";
@@ -793,8 +775,6 @@
 			};
 
 			vcc_1v8: LDO_REG7 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-name = "vcc_1v8";
@@ -804,8 +784,6 @@
 			};
 
 			vcc1v8_dvp: LDO_REG8 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-name = "vcc1v8_dvp";
@@ -815,8 +793,6 @@
 			};
 
 			vcc2v8_dvp: LDO_REG9 {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <1800000>;
 				regulator-max-microvolt = <1800000>;
 				regulator-name = "vcc2v8_dvp";
@@ -826,8 +802,6 @@
 			};
 
 			dcdc_boost: BOOST {
-				regulator-always-on;
-				regulator-boot-on;
 				regulator-min-microvolt = <5000000>;
 				regulator-max-microvolt = <5000000>;
 				regulator-name = "boost";
