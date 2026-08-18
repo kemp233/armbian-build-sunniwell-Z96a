@@ -1,12 +1,17 @@
-# U-Boot z96a v2026.01 notes
+# Z96A U-Boot 2026.01 (kemp233/u-boot-1)
 
-Source: https://github.com/kemp233/u-boot-1 branch rockchip-v2026.01
+Source: https://github.com/kemp233/u-boot-1 branch `rockchip-v2026.01`
 
-Board files (V2):
-- configs/z96a-rk3568-laptop-v2_defconfig
-- dts: rockchip/rk3568-z96a-laptop-v2.dts
-- u-boot dtsi: rk3568-z96a-laptop-v2-u-boot.dtsi
+Board (V2):
+- defconfig: `z96a-rk3568-laptop-v2_defconfig`
+- DT: `rockchip/rk3568-z96a-laptop-v2.dts`
+- u-boot dtsi: `rk3568-z96a-laptop-v2-u-boot.dtsi`
 
-Armbian:
-- BOOTCONFIG=z96a-rk3568-laptop-v2_defconfig
-- Linux BOOT_FDT_FILE=rockchip/rk3568-z96a-laptop-v2.dtb (kernel DTB, separate)
+Armbian packaging (binman, like nanopi-r5s):
+```
+ROCKCHIP_TPL=$RKBIN/$DDR_BLOB BL31=$RKBIN/$BL31_BLOB \
+  make spl/u-boot-spl u-boot.bin flash.bin
+# package artifacts: idbloader.img u-boot.itb
+```
+
+Not radxa 2017.09. Linux DTB remains `rk3568-z96a-laptop-v2.dtb` from kernel.
