@@ -1,0 +1,27 @@
+--- a/arch/arm/dts/rk3568-u-boot.dtsi	2026-08-18 16:45:08.872683018 +0000
++++ b/arch/arm/dts/rk3568-u-boot.dtsi	2026-08-18 16:47:27.657576010 +0000
+@@ -394,6 +394,24 @@
+ 	u-boot,dm-pre-reloc;
+ };
+ 
++/* Z96A full-blood: GPIO3/4 for Linux pin 96-159 (VBUS EN 110/111 etc.) */
++&gpio3 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++};
++
++&gpio4 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++};
++
++/* I2C0: RK809 + HUSB311 on Z96A V2 */
++&i2c0 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++	clock-frequency = <100000>;
++};
++
+ &pcfg_pull_none_drv_level_1 {
+ 	u-boot,dm-pre-reloc;
+ };
