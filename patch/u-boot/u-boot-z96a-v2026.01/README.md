@@ -1,11 +1,11 @@
-# Z96A U-Boot 2026.01 patches
+# Z96A U-Boot 2026.01 (kemp233/u-boot-1 @ rockchip-v2026.01)
 
-Source: kemp233/u-boot-1 @ rockchip-v2026.01
+Board: z96a-rk3568-laptop-v2_defconfig / rk3568-z96a-laptop-v2.dts
 
-- 0001-disable-dnl-key-false-positive-reboot.patch
-  After adc vref fix, SARADC ch1 idle false-triggers download mode reset loop.
-  Disables rockchip_dnl_key_pressed() default heuristic.
+Already in upstream branch (no extra patches required here):
+- gpio3/4 usable (mainline tree)
+- factory adc-keys + vcca_1v8 saradc vref (757e34dc)
+- dnl-key false-positive reboot disabled (5c2c1142)
 
-Board DT in u-boot-1 already has:
-- vcca_1v8 + saradc vref-supply
-- factory adc-keys (volume up / Recovery) on ch0
+Do not add a boot_mode.c patch here — source already has the fix; a
+stale unidiff will fail apply ("Hunk is longer than expected").
