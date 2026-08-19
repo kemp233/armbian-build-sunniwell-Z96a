@@ -1,0 +1,6 @@
+Kernel board DTS (expanded form used by this fork):
+- cpus/cpu@*: clocks must be SCMI clk 0 (phandle of /firmware/scmi/protocol@14)
+- cpu-supply must point at vdd_logic (RK809 DCDC_REG1)
+- Do NOT invent vdd_cpu syr837 node on V2 hardware
+- TSADC: prefer no OTP nvmem-cells if CONFIG_NVMEM_ROCKCHIP_OTP=n
+- gpu-thermal MUST contain trips{} or rockchip-thermal probe fails (-22)

@@ -50,7 +50,16 @@ load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
-fdt resize 65536
+fdt resize 131072
+
+# Z96A-HAL safety net: force CPU clocks to SCMI protocol@14 clk0
+# (Kernel DTS should already match; this guards tree regressions)
+echo "Z96A-HAL: cpu clocks -> SCMI clk0"
+fdt set /cpus/cpu@0 clocks <0x02 0x00> || true
+fdt set /cpus/cpu@100 clocks <0x02 0x00> || true
+fdt set /cpus/cpu@200 clocks <0x02 0x00> || true
+fdt set /cpus/cpu@300 clocks <0x02 0x00> || true
+
 
 
 fdt set /vcc5v0-usb status "okay"

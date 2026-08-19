@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* Z96A Laptop V2 — U-Boot-only fragments */
+
+#include "rk356x-u-boot.dtsi"
+#include "rk3568-u-boot.dtsi"
+
+&uart2 {
+	bootph-all;
+	status = "okay";
+};
+
+&i2c0 {
+	bootph-pre-ram;
+	status = "okay";
+};
+
+&saradc {
+	bootph-all;
+	status = "okay";
+};
+
+/* Ensure fixed 1.8V VREF is early enough for dnl-key / adc-keys */
+&vcca_1v8 {
+	bootph-all;
+};

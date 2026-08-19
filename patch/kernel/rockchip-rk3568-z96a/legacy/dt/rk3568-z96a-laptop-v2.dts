@@ -4139,8 +4139,6 @@
 		resets = <0x23 0x182 0x23 0x181 0x23 0x1d7>;
 		reset-names = "tsadc\0tsadc-apb\0tsadc-phy";
 		#thermal-sensor-cells = <0x01>;
-		nvmem-cells = <0x102 0x103>;
-		nvmem-cell-names = "trim_base\0trim_base_frac";
 		rockchip,hw-tshut-temp = <0x1d4c0>;
 		rockchip,hw-tshut-mode = <0x00>;
 		rockchip,hw-tshut-polarity = <0x00>;
@@ -4154,14 +4152,26 @@
 
 		tsadc@0 {
 			reg = <0x00>;
-			nvmem-cells = <0x106 0x107>;
-			nvmem-cell-names = "trim_l\0trim_h";
 		};
 
 		tsadc@1 {
 			reg = <0x01>;
-			nvmem-cells = <0x108 0x109>;
-			nvmem-cell-names = "trim_l\0trim_h";
+		};
+	};
+
+
+	/* HAL: Recovery = SARADC ch0 volume-up thr=9 (must match U-Boot HAL) */
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <0x1dd 0x00>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <0x1b7740>;
+		status = "okay";
+
+		volumeup-key {
+			label = "volume up";
+			linux,code = <0x73>;
+			press-threshold-microvolt = <0x09>;
 		};
 	};
 

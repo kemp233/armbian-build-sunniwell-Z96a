@@ -1,0 +1,3 @@
+Synced from config/boards/hal/z96a-rk3568-laptop-v2/uboot
+Recovery press-threshold-microvolt = 9
+Do not edit copies; edit HAL then re-run scripts/sync-hal-into-trees.sh

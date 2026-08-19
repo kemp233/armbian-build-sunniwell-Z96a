@@ -302,6 +302,18 @@ jobs:
           clean: false
           path: build
 
+      - name: "Z96A HAL sync gate (U-Boot↔Kernel)"
+        shell: bash
+        run: |
+          set -e
+          cd build
+          if [[ -x config/boards/hal/z96a-rk3568-laptop-v2/scripts/check-hal-sync.sh ]]; then
+            ./config/boards/hal/z96a-rk3568-laptop-v2/scripts/sync-hal-into-trees.sh
+            ./config/boards/hal/z96a-rk3568-laptop-v2/scripts/check-hal-sync.sh
+          else
+            echo "HAL scripts missing — skip"
+          fi
+
       - name: "Prepare userpatches"
         shell: bash
         run: |

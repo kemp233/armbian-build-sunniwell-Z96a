@@ -4154,6 +4154,22 @@
 		};
 	};
 
+
+	/* HAL: Recovery = SARADC ch0 volume-up thr=9 (must match U-Boot HAL) */
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <0x1dd 0x00>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <0x1b7740>;
+		status = "okay";
+
+		volumeup-key {
+			label = "volume up";
+			linux,code = <0x73>;
+			press-threshold-microvolt = <0x09>;
+		};
+	};
+
 	saradc@fe720000 {
 		compatible = "rockchip,rk3568-saradc\0rockchip,rk3399-saradc";
 		reg = <0x00 0xfe720000 0x00 0x100>;

@@ -1,0 +1,32 @@
+name: "Z96A HAL sync (U-Boot ↔ Kernel)"
+
+on:
+  pull_request:
+    paths:
+      - 'config/boards/hal/**'
+      - 'config/boards/z96a-rk3568-laptop-v2.conf'
+      - 'config/sources/families/rockchip-rk3568-z96a.conf'
+      - 'config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd'
+      - 'patch/kernel/rockchip-rk3568-z96a/**'
+      - 'patch/u-boot/u-boot-z96a-v2026.01/**'
+      - 'userpatches/u-boot/u-boot-z96a-v2026.01/**'
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'config/boards/hal/**'
+      - 'patch/kernel/rockchip-rk3568-z96a/**'
+      - 'patch/u-boot/u-boot-z96a-v2026.01/**'
+      - 'config/sources/families/rockchip-rk3568-z96a.conf'
+      - 'config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd'
+
+jobs:
+  hal-check:
+    name: HAL contract gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sync HAL copies into patch dirs
+        run: ./config/boards/hal/z96a-rk3568-laptop-v2/scripts/sync-hal-into-trees.sh
+      - name: Check Recovery thr=9 / SCMI / regulator / thermal
+        run: ./config/boards/hal/z96a-rk3568-laptop-v2/scripts/check-hal-sync.sh

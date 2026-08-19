@@ -1,0 +1,16 @@
+/* Include-equivalent fragment — values MUST match HAL.md */
+/ {
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		status = "okay";
+
+		volumeup-key {
+			label = "volume up";
+			linux,code = <KEY_VOLUMEUP>;
+			press-threshold-microvolt = <9>;
+		};
+	};
+};

@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Sunniwell Z96A RK3568 Laptop V2 — U-Boot DT
+ * Recovery/download key from FACTORY U-Boot DTB (z96a-extract/factory.dts):
+ *   adc-keys ch0, label "volume up", press-threshold-microvolt = <0x09>
+ * Android kernel DTB has the same ladder but status=disabled (runtime keys
+ * unused); reboot-mode recovery is a separate syscon path (0x5242c303).
+ * Case silkscreen "Recovery" == this volume-up ADC key -> Rockchip download,
+ * NOT Android /recovery partition by itself.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+#include "rk3568.dtsi"
+
+/ {
+	model = "Sunniwell Z96A RK3568 Laptop V2";
+	compatible = "sunniwell,z96a-rk3568-laptop-v2", "rockchip,rk3568";
+
+	aliases {
+		mmc0 = &sdhci;
+		mmc1 = &sdmmc0;
+		serial2 = &uart2;
+		i2c0 = &i2c0;
+	};
+
+	chosen {
+		stdout-path = "serial2:1500000n8";
+	};
+
+	/* SARADC VREF — Android/factory kernel use vcca 1.8V; factory U-Boot
+	 * extract omitted vref-supply but mainline rockchip_saradc needs it. */
+	vcca_1v8: regulator-vcca-1v8 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcca_1v8";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		bootph-all;
+	};
+
+	/* Factory U-Boot: only volume-up on ch0, threshold 0x09 (9 uV) */
+	adc-keys {
+		compatible = "adc-keys";
+		io-channels = <&saradc 0>;
+		io-channel-names = "buttons";
+		keyup-threshold-microvolt = <1800000>;
+		status = "okay";
+		bootph-all;
+
+		volumeup-key {
+			label = "volume up";
+			linux,code = <KEY_VOLUMEUP>;
+			/* factory.dts: press-threshold-microvolt = <0x09> */
+			press-threshold-microvolt = <9>;
+			bootph-all;
+		};
+	};
+};
+
+&uart2 {
+	pinctrl-0 = <&uart2m0_xfer>;
+	status = "okay";
+};
+
+&sdhci {
+	bus-width = <8>;
+	cap-mmc-highspeed;
+	mmc-hs200-1_8v;
+	non-removable;
+	status = "okay";
+};
+
+&sdmmc0 {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	disable-wp;
+	status = "okay";
+};
+
+&i2c0 {
+	status = "okay";
+	clock-frequency = <100000>;
+};
+
+&saradc {
+	vref-supply = <&vcca_1v8>;
+	status = "okay";
+	bootph-all;
+};
+
+&usb_host0_xhci {
+	status = "okay";
+};
+
+&usb_host1_xhci {
+	status = "okay";
+};
+
+&usb2phy0 {
+	status = "okay";
+};

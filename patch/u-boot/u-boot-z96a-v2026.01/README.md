@@ -1,10 +1,14 @@
-# Z96A U-Boot 2026.01
+# Z96A U-Boot 2026.01 patches
 
-Source of truth: kemp233/u-boot-1 @ rockchip-v2026.01
+Source: kemp233/u-boot-1 @ rockchip-v2026.01
 
-Recovery/download key:
-- Factory = SARADC **ch0** adc-keys ("volume up" / "Recovery"), pressed ~0V
-- Do **not** use ch1 raw 0..30 (idle false reboot after vref fix)
-- Implemented in rockchip_dnl_key_pressed() via BUTTON + ch0 raw<=40
+## HAL sync (mandatory)
+Canonical DT lives in:
+`config/boards/hal/z96a-rk3568-laptop-v2/uboot/`
 
-No local broken unidiff here (Armbian patch apply is fragile). Tree pulls u-boot-1.
+- `rk3568-z96a-laptop-v2.dts` — Recovery **thr=9**, SARADC ch0 volume-up
+- Injected by `z96a-hal-inject-dt.patch.sh` and family hook
+  `pre_config_uboot_target__z96a_hal_inject_dt`
+
+Do **not** hand-edit thr to 0x6d6/1750. Edit HAL then:
+`./config/boards/hal/z96a-rk3568-laptop-v2/scripts/sync-hal-into-trees.sh`
