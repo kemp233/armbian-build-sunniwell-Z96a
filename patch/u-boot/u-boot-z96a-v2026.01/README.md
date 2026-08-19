@@ -1,11 +1,10 @@
-# Z96A U-Boot 2026.01 (kemp233/u-boot-1 @ rockchip-v2026.01)
+# Z96A U-Boot 2026.01
 
-Board: z96a-rk3568-laptop-v2_defconfig / rk3568-z96a-laptop-v2.dts
+Source of truth: kemp233/u-boot-1 @ rockchip-v2026.01
 
-Already in upstream branch (no extra patches required here):
-- gpio3/4 usable (mainline tree)
-- factory adc-keys + vcca_1v8 saradc vref (757e34dc)
-- dnl-key false-positive reboot disabled (5c2c1142)
+Recovery/download key:
+- Factory = SARADC **ch0** adc-keys ("volume up" / "Recovery"), pressed ~0V
+- Do **not** use ch1 raw 0..30 (idle false reboot after vref fix)
+- Implemented in rockchip_dnl_key_pressed() via BUTTON + ch0 raw<=40
 
-Do not add a boot_mode.c patch here — source already has the fix; a
-stale unidiff will fail apply ("Hunk is longer than expected").
+No local broken unidiff here (Armbian patch apply is fragile). Tree pulls u-boot-1.
