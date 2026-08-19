@@ -1,17 +1,11 @@
-# Z96A U-Boot 2026.01 (kemp233/u-boot-1)
+# Z96A U-Boot 2026.01 patches
 
-Source: https://github.com/kemp233/u-boot-1 branch `rockchip-v2026.01`
+Source: kemp233/u-boot-1 @ rockchip-v2026.01
 
-Board (V2):
-- defconfig: `z96a-rk3568-laptop-v2_defconfig`
-- DT: `rockchip/rk3568-z96a-laptop-v2.dts`
-- u-boot dtsi: `rk3568-z96a-laptop-v2-u-boot.dtsi`
+- 0001-disable-dnl-key-false-positive-reboot.patch
+  After adc vref fix, SARADC ch1 idle false-triggers download mode reset loop.
+  Disables rockchip_dnl_key_pressed() default heuristic.
 
-Armbian packaging (binman, like nanopi-r5s):
-```
-ROCKCHIP_TPL=$RKBIN/$DDR_BLOB BL31=$RKBIN/$BL31_BLOB \
-  make spl/u-boot-spl u-boot.bin flash.bin
-# package artifacts: idbloader.img u-boot.itb
-```
-
-Not radxa 2017.09. Linux DTB remains `rk3568-z96a-laptop-v2.dtb` from kernel.
+Board DT in u-boot-1 already has:
+- vcca_1v8 + saradc vref-supply
+- factory adc-keys (volume up / Recovery) on ch0
