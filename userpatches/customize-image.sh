@@ -410,3 +410,127 @@ MOTDEOF
 
 chmod 755 /etc/update-motd.d/99-live-extract
 echo "Live extraction script added to /etc/update-motd.d/99-live-extract"
+
+# === V4 early-ttl: 7-stage USB chain, non-blocking heartbeat, hotplug logger ===
+TTY_PATH=/dev/ttyS2
+
+cat > /usr/local/bin/z96a-early-ttl.sh <<'EARLYEOF'
+#!/bin/sh
+# Z96A V4 early-ttl: runs at sysinit.target Before=basic.target
+# Writes directly to TTL (no login), heartbeat non-blocking, USB hotplug logger
+set -eu
+
+TTL="/dev/ttyS2"
+KMSG="/dev/kmsg"
+LOG="/var/log/z96a-early-ttl.log"
+HOTPLUG_LOG="/var/log/z96a-usb-hotplug.log"
+BLAST() { printf "%s\n" "$*" | timeout 0.2 tee -a "$TTL" "$KMSG" "$LOG" >/dev/null 2>&1 || true; }
+
+mkdir -p /var/log
+: > "$LOG"; : > "$HOTPLUG_LOG"
+
+BLAST "=== Z96A V4 EARLY TTL START: $(date -u) ==="
+BLAST "Kernel: $(uname -r)"
+BLAST "Cmdline: $(cat /proc/cmdline)"
+
+# Stage 1: U-Boot CLK/MMC/Image/FDT handoff
+BLAST "--- Stage 1: U-Boot handoff ---"
+dmesg -T | grep -iE "mmc|clk|vop|drm|boot" | tail -30 >> "$LOG" 2>&1
+dmesg | grep -iE "spl|u-boot|fdt|Image|mmc" | tail -10 | while read l; do BLAST "$l"; done
+
+# Stage 2: VBUS regulators (gpio + always-on)
+BLAST "--- Stage 2: VBUS regulators ---"
+for r in /sys/class/regulator/*; do
+  n=$(cat "$r/name" 2>/dev/null)
+  if echo "$n" | grep -qiE "vcc5v0|vbus|usb|otg|host"; then
+    en=$(cat "$r/enable" 2>/dev/null); uv=$(cat "$r/microvolts" 2>/dev/null)
+    BLAST "$(basename $r): $n enable=$en uV=$uv"
+  fi
+done
+# check gpio lines for vcc5v0-usb/host/otg
+if [ -f /sys/kernel/debug/gpio ]; then
+  grep -iE "vcc5v0|gpio-.*(0x4c|0x132|76|306)" /sys/kernel/debug/gpio | while read l; do BLAST "$l"; done
+fi
+
+# Stage 3: PHY FE8A/FE8B + DWC3 FCC/FD0 dis-u1/u2
+BLAST "--- Stage 3: PHY & DWC3 ---"
+dmesg | grep -iE "phy.*fe8|dwc3|fcc|fd0|dis-u[12]" | tail -10 | while read l; do BLAST "$l"; done
+for p in /sys/bus/platform/devices/*phy*; do
+  [ -d "$p" ] && BLAST "PHY: $(basename $p)"
+done
+
+# Stage 4: HUSB311 0x4E i2c scan
+BLAST "--- Stage 4: HUSB311 i2c ---"
+if command -v i2cdetect >/dev/null 2>&1; then
+  i2cdetect -y -r 12 2>/dev/null | grep -E "4e|6b" | while read l; do BLAST "i2c-12: $l"; done
+fi
+ls /sys/bus/i2c/devices/ | grep -iE "4e|6b|husb|sc8886" | while read l; do BLAST "i2c dev: $l"; done
+
+# Stage 5: lsusb + 5s hotplug window + 25s background hotplug logger
+BLAST "--- Stage 5: USB topology + hotplug window ---"
+lsusb -t 2>/dev/null | while read l; do BLAST "$l"; done
+
+# Background hotplug logger (25s)
+(
+  sleep 2
+  BLAST "hotplug: monitoring for 25s..."
+  timeout 25 udevadm monitor -u -k -s usb 2>&1 | while read l; do
+    echo "$(date -u +%H:%M:%S) $l" | timeout 0.2 tee -a "$HOTPLUG_LOG" "$KMSG" "$TTL" >/dev/null 2>&1 || true
+  done
+  BLAST "hotplug: done"
+) &
+HOTPLUG_PID=$!
+BLAST "hotplug logger PID: $HOTPLUG_PID (bg)"
+
+# Stage 6: thermal/cpufreq
+BLAST "--- Stage 6: thermal/cpufreq ---"
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null | xargs -I{} BLAST "governor: {}"
+cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -4 | while read l; do BLAST "temp: $l"; done
+
+# Stage 7: DRM
+BLAST "--- Stage 7: DRM ---"
+dmesg | grep -iE "drm|vop|panel|edp|backlight" | tail -5 | while read l; do BLAST "$l"; done
+
+BLAST "=== Z96A V4 EARLY TTL END: $(date -u) ==="
+
+# Non-blocking heartbeat (10 x 10s) in background
+(
+  for i in $(seq 1 10); do
+    sleep 10
+    timeout 0.2 printf "heartbeat %d/10 %s\n" "$i" "$(date -u +%H:%M:%S)" | tee -a "$TTL" "$KMSG" "$LOG" >/dev/null 2>&1 || true
+  done
+) &
+
+wait $HOTPLUG_PID 2>/dev/null || true
+EARLYEOF
+
+chmod +x /usr/local/bin/z96a-early-ttl.sh
+
+cat > /etc/systemd/system/z96a-early-ttl.service <<'EARLYSVC'
+[Unit]
+Description=Z96A V4 early TTL debug (sysinit, no login)
+DefaultDependencies=no
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/z96a-early-ttl.sh
+StandardOutput=tty
+StandardError=inherit
+TTYPath=/dev/ttyS2
+TTYReset=yes
+TimeoutStartSec=0
+
+[Install]
+WantedBy=sysinit.target
+EARLYSVC
+
+systemctl enable z96a-early-ttl.service || true
+systemctl mask getty@ttyS2.service || true
+
+# 确保充电/USB 驱动进 initrd（早期探测）
+for m in sc8886 husb311 bq25890 bq25700 tcpci_husb311 fusb302 typec tcpm phy-rockchip-typec; do
+  echo "$m" >> /etc/initramfs-tools/modules
+done
+update-initramfs -u -k all || true
+
