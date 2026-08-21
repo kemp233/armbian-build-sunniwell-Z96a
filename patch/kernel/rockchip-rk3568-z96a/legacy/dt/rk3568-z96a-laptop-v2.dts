@@ -2412,7 +2412,7 @@
 		snps,axi-config = <0x8c>;
 		snps,mtl-rx-config = <0x8d>;
 		snps,mtl-tx-config = <0x8e>;
-		status = "disabled";
+		status = "okay";
 		phandle = <0x8b>;
 
 		mdio {
