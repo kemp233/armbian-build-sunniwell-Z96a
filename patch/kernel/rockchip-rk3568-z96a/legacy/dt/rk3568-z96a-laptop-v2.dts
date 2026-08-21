@@ -4358,6 +4358,7 @@
 		otg-port {
 			#phy-cells = <0x00>;
 			status = "okay";
+			phy-supply = <0x40>;
 			phandle = <0x28>;
 		};
 	};
@@ -4383,7 +4384,7 @@
 		otg-port {
 			#phy-cells = <0x00>;
 			status = "okay";
-			phy-supply = <0x114>;
+			phy-supply = <0x40>;
 			phandle = <0x2d>;
 		};
 	};
@@ -7120,8 +7121,8 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
-		// enable-active-high;  // removed: always-on via vin-supply
-		// gpio = <0x4c 0x0f 0x00>;  // removed: always-on via vin-supply
+		enable-active-high;
+		gpio = <0x4c 0x0f 0x00>;
 		vin-supply = <0x12f>;
 		pinctrl-names = "default";
 		pinctrl-0 = <0x130>;
@@ -7135,8 +7136,8 @@
 		regulator-always-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
-		// enable-active-high;  // removed: always-on via vin-supply
-		// gpio = <0x4c 0x0e 0x00>;  // removed: always-on via vin-supply
+		enable-active-high;
+		gpio = <0x4c 0x0e 0x00>;
 		vin-supply = <0x12f>;
 		pinctrl-names = "default";
 		pinctrl-0 = <0x131>;
@@ -7150,8 +7151,8 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
-		// enable-active-high;  // removed: always-on via vin-supply
-		// gpio = <0x132 0x1d 0x00>;  // removed: always-on via vin-supply
+		enable-active-high;
+		gpio = <0x132 0x1d 0x00>;
 		vin-supply = <0x12f>;
 		pinctrl-names = "default";
 		pinctrl-0 = <0x133>;
