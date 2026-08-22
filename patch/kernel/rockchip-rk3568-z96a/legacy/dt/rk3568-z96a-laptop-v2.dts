@@ -978,28 +978,10 @@
 			status = "okay";
 			phandle = <0x164>;
 
-			port {
-				#address-cells = <0x01>;
-				#size-cells = <0x00>;
 
-				endpoint@0 {
-					reg = <0x00>;
-					remote-endpoint = <0x29>;
-					phandle = <0x42>;
-				};
-			};
 		};
 
-		port {
-			#address-cells = <0x01>;
-			#size-cells = <0x00>;
 
-			endpoint@0 {
-				reg = <0x00>;
-				remote-endpoint = <0x2a>;
-				phandle = <0x43>;
-			};
-		};
 	};
 
 	usbhost {
@@ -1367,7 +1349,7 @@
 		};
 
 		sc8886@6b {
-			compatible = "southchip,sc8886";
+			compatible = "ti,bq25700\0southchip,sc8886";
 			reg = <0x6b>;
 			interrupt-parent = <0x41>;
 			interrupts = <0x12 0x08>;
@@ -1408,22 +1390,7 @@
 			status = "okay";
 			phandle = <0x177>;
 
-			ports {
-				#address-cells = <0x01>;
-				#size-cells = <0x00>;
 
-				port@0 {
-					#address-cells = <0x01>;
-					#size-cells = <0x00>;
-					reg = <0x00>;
-
-					endpoint@0 {
-						reg = <0x00>;
-						remote-endpoint = <0x42>;
-						phandle = <0x29>;
-					};
-				};
-			};
 
 			connector {
 				compatible = "usb-c-connector";
