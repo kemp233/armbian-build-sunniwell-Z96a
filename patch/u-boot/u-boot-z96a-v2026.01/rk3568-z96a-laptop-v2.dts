@@ -104,3 +104,101 @@
 &usb2phy0 {
 	status = "okay";
 };
+/* ---- z96a-pwrfix: USB VBUS rails, aligned to factory DT ---- */
+/ {
+	vcc5v0_host: regulator-vcc5v0-host {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_host";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&z96a_vcc5v0_host_en>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vcc5v0_otg: regulator-vcc5v0-otg {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_otg";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio0 RK_PA5 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&z96a_vcc5v0_otg_en>;
+	};
+
+	vcc5v0_usb2_host1: regulator-vcc5v0-usb2-host1 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb2_host1";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio4 RK_PB3 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&z96a_vcc5v0_host1_en>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vcc5v0_usb2_host2: regulator-vcc5v0-usb2-host2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb2_host2";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio4 RK_PB1 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&z96a_vcc5v0_host2_en>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	vcc5v0_usb_keyboard: regulator-vcc5v0-usb-keyboard {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb_keyboard";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		enable-active-high;
+		gpio = <&gpio2 RK_PD7 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&z96a_keyboard_pwr>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+&pinctrl {
+	z96a-usb-pwr {
+		z96a_vcc5v0_host_en: z96a-vcc5v0-host-en {
+			rockchip,pins = <0 RK_PA6 0 &pcfg_pull_none>;
+		};
+
+		z96a_vcc5v0_otg_en: z96a-vcc5v0-otg-en {
+			rockchip,pins = <0 RK_PA5 0 &pcfg_pull_none>;
+		};
+
+		z96a_vcc5v0_host1_en: z96a-vcc5v0-host1-en {
+			rockchip,pins = <4 RK_PB3 0 &pcfg_pull_none>;
+		};
+
+		z96a_vcc5v0_host2_en: z96a-vcc5v0-host2-en {
+			rockchip,pins = <4 RK_PB1 0 &pcfg_pull_none>;
+		};
+
+		z96a_keyboard_pwr: z96a-keyboard-pwr {
+			rockchip,pins = <2 RK_PD7 0 &pcfg_pull_none>;
+		};
+	};
+};
+
+&usb_host0_xhci {
+	vbus-supply = <&vcc5v0_otg>;
+};
+
+&usb_host1_xhci {
+	vbus-supply = <&vcc5v0_host>;
+};
+
