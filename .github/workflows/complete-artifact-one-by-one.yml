@@ -51,6 +51,12 @@ on:
         required: false
         default: ''
 
+      armbian_ignore_cache:
+        type: boolean
+        description: 'Ignore remote artifact cache (force kernel/U-Boot rebuild from patched DTS)'
+        required: false
+        default: false
+
       armbian_board:
         type: choice
         description: 'Board'
@@ -358,6 +364,11 @@ jobs:
           elif [[ "${BUILD_BRANCH}" == "edge" ]]; then
             # Edge must consume the current kemp233/linux-rockchip DTS/kernel,
             # never a stale 6.1 artifact from the remote cache.
+            FORCE_KERNEL_REBUILD="yes"
+          fi
+
+          if [[ "${{ inputs.armbian_ignore_cache }}" == "true" ]]; then
+            # Manual override: DTS/patches changed — never consume remote kernel/U-Boot debs
             FORCE_KERNEL_REBUILD="yes"
           fi
 
