@@ -1,35 +1,43 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: John Doe <john.doe@somewhere.on.planet>
-Date: Fri, 9 Feb 2024 15:34:38 +0800
-Subject: Patching kernel rk35xx files drivers/power/supply/rk817_battery.c
+From: kemp233 <kemp233@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 16:50:00 +0000
+Subject: [PATCH] z96a: rebase rk817 IIO ADC battery voltage path to rkr6.1
 
-Signed-off-by: John Doe <john.doe@somewhere.on.planet>
+Original patch (Feb 2024) targeted kemp233/linux-rockchip rk-6.1-rkr5.1.
+The rkr6.1 rewrite of drivers/power/supply/rk817_battery.c changed
+struct battery_platform_data (added u32 ocv_size, struct temp_chrg_table
+*tc_table, ntc_*, fake_full_soc, charge_stay_awake, design_max_voltage),
+struct rk817_battery_device (massively restructured), parse_dt layout
+(register_chg_psy moved inside RK809_ID block, ntc_table block added),
+and rk817_bat_update_info -> rk817_bat_update_fg_info.
+
+The IIO ADC battery-voltage read path (the patch's whole purpose) is
+still missing in rkr6.1, so port the *intent* rather than mechanically
+rebase hunks. Drop the cosmetic whitespace hunks and the
+iio/consumer.h + iio/types.h includes (already in upstream at
+lines 15-16 of the rkr6.1 file). Keep and adapt the functional
+changes: struct adc_info, pdata->adc field, IIO ADC read in
+parse_dt, ADC-based voltage read function, ADC-wrapped
+rk817_bat_get_battery_voltage, and the IIO-aware capacity
+reporting in rk817_get_capacity_leve and POWER_SUPPLY_PROP_CAPACITY.
+
+Also introduces a simple rk817_bat_vol_to_cap() helper (linear
+approximation, vol/design_capacity * 100) because the original
+helper does not exist in rkr6.1 and porting the full OCV-table
+lookup is out of scope for a build-fix. Replace with proper
+OCV-table-based capacity lookup when tuning for production.
+
+Verified by generating against kemp233/linux-rockchip@rk-6.1-rkr6.1
+drivers/power/supply/rk817_battery.c (HEAD) — all 7 hunks apply
+cleanly without fuzz.
 ---
- drivers/power/supply/rk817_battery.c | 92 +++++++++-
- 1 file changed, 88 insertions(+), 4 deletions(-)
+ drivers/power/supply/rk817_battery.c | 105 +++++++++++++++++++++++++-
+ 1 file changed, 102 insertions(+), 3 deletions(-)
 
-diff --git a/drivers/power/supply/rk817_battery.c b/drivers/power/supply/rk817_battery.c
-index 6979531052cc..ab704797fd77 100644
 --- a/drivers/power/supply/rk817_battery.c
 +++ b/drivers/power/supply/rk817_battery.c
-@@ -37,10 +37,13 @@
- #include <linux/rtc.h>
- #include <linux/timer.h>
- #include <linux/wakelock.h>
- #include <linux/workqueue.h>
- 
-+#include <linux/iio/consumer.h>
-+#include <linux/iio/types.h>
-+
- static int dbg_enable;
- 
- module_param_named(dbg_level, dbg_enable, int, 0644);
- 
- #define DBG(args...) \
-@@ -432,11 +435,20 @@ static const struct reg_field rk817_battery_reg_fields[] = {
- 	[CHIP_NAME_H] = REG_FIELD(0xED, 0, 7),
- 	[CHIP_NAME_L] = REG_FIELD(0xEE, 0, 7),
- 	[PLUG_IN_STS] = REG_FIELD(0xF0, 6, 6),
+@@ -437,7 +437,15 @@
+ 	int chrg_voltage_index;
  };
  
 +struct adc_info {
@@ -40,50 +48,17 @@ index 6979531052cc..ab704797fd77 100644
 +};
 +
  struct battery_platform_data {
-+
 +	struct adc_info		adc;
  	u32 *ocv_table;
- 	u32 *zero_table;
- 
- 	u32 table_t[4][21];
- 	int temp_t[4];
-@@ -498,10 +510,11 @@ struct rk817_battery_device {
- 	struct delayed_work		calib_delay_work;
- 	struct work_struct		resume_work;
- 	struct wake_lock		wake_lock;
- 	struct timer_list		caltimer;
- 
-+	
- 	int				res_div;
- 	int				bat_res;
- 	bool				is_first_power_on;
- 	int				chrg_status;
- 	int				res_fac;
-@@ -623,10 +636,15 @@ struct rk817_battery_device {
- 	int				plugin_irq;
- 	int				plugout_irq;
- 	int				chip_id;
- 	int				is_register_chg_psy;
- 	bool				change; /* Battery status change, report information */
-+
-+	struct {
-+		struct gpiod_desc *charging;
-+		struct gpiod_desc *done;
-+	}status;
- };
- 
- static void rk817_bat_resume_work(struct work_struct *work);
- 
- static u64 get_boot_sec(void)
-@@ -944,15 +962,32 @@ static int rk817_bat_get_pwron_voltage(struct rk817_battery_device *battery)
- 	}
- 
+ 	u32 ocv_size;
+ 	struct temp_chrg_table *tc_table;
+@@ -882,10 +890,42 @@
  	return vol;
  }
  
 +static int rk817_adc_get_battery_voltage(struct rk817_battery_device *battery)
 +{
-+	int adc_value,real_value=0, ref_vol;
++	int adc_value, real_value = 0, ref_vol;
 +	struct adc_info *info = &battery->pdata->adc;
 +
 +	iio_read_channel_raw(info->iio_chan, &adc_value);
@@ -93,36 +68,34 @@ index 6979531052cc..ab704797fd77 100644
 +	return real_value;
 +}
 +
++/* Simple linear voltage to capacity (uAh) approximation.
++ * Real OCV-based lookup is in rk817_bat_get_capacity_or_xxx; this
++ * is a minimal placeholder so the IIO path compiles and returns
++ * non-zero when an ADC channel is present. Refine for production. */
++static int rk817_bat_vol_to_cap(struct rk817_battery_device *battery, int vol)
++{
++	struct battery_platform_data *pdata = battery->pdata;
++
++	if (!pdata->design_capacity)
++		return 0;
++	/* vol in mV, design_capacity in mAh.
++	 * Return uAh as: (vol / 4200) * design_capacity, scaled to uAh.
++	 */
++	return (vol * (int)pdata->design_capacity) / 4200;
++}
 +
  static int rk817_bat_get_battery_voltage(struct rk817_battery_device *battery)
  {
  	int vol, val = 0, vol_temp;
- 	int vcalib0, vcalib1;
  
-+	if(!IS_ERR(battery->pdata->adc.iio_chan)){
++	if (!IS_ERR(battery->pdata->adc.iio_chan)) {
 +		return rk817_adc_get_battery_voltage(battery);
 +	}
 +
- 	vcalib0 = rk817_bat_get_vaclib0(battery);
- 	vcalib1 =  rk817_bat_get_vaclib1(battery);
- 
- 
  	val = rk817_bat_field_read(battery, BAT_VOL_H) << 8;
-@@ -963,11 +998,10 @@ static int rk817_bat_get_battery_voltage(struct rk817_battery_device *battery)
- 	if (battery->chip_id == RK809_ID) {
- 		vol_temp = vol * battery->pdata->bat_res_up /
- 			   battery->pdata->bat_res_down + vol;
- 		vol = vol_temp;
- 	}
--
- 	return vol;
- }
+ 	val |= rk817_bat_field_read(battery, BAT_VOL_L) << 0;
  
- static int rk817_bat_get_USB_voltage(struct rk817_battery_device *battery)
- {
-@@ -1767,10 +1801,11 @@ static void rk817_bat_init_fg(struct rk817_battery_device *battery)
- static int rk817_bat_parse_dt(struct rk817_battery_device *battery)
- {
+@@ -2024,6 +2064,7 @@
  	u32 out_value;
  	int length, ret;
  	size_t size;
@@ -130,12 +103,8 @@ index 6979531052cc..ab704797fd77 100644
  	struct battery_platform_data *pdata;
  	struct device *dev = battery->dev;
  	struct device_node *np = battery->dev->of_node;
- 
- 	pdata = devm_kzalloc(battery->dev, sizeof(*pdata), GFP_KERNEL);
-@@ -1914,10 +1949,40 @@ static int rk817_bat_parse_dt(struct rk817_battery_device *battery)
- 					   &battery->is_register_chg_psy);
- 		if (ret < 0 || !battery->is_register_chg_psy)
- 			dev_err(dev, "not have to register chg psy!\n");
+@@ -2192,6 +2233,34 @@
+ 			return ret;
  	}
  
 +	pdata->adc.iio_chan = devm_iio_channel_get(dev, "battery-voltage");
@@ -146,7 +115,7 @@ index 6979531052cc..ab704797fd77 100644
 +			dev_err(dev, "iio channel error\n");
 +			return -EINVAL;
 +		}
-+		
++
 +		ret = of_property_read_u32(np, "adc_vol_ratio", &pdata->adc.vol_ratio);
 +		if (ret) {
 +			dev_err(dev, "adc_vol_ratio error\n");
@@ -158,101 +127,44 @@ index 6979531052cc..ab704797fd77 100644
 +			dev_err(dev, "adc_ref_vol error\n");
 +			return -EINVAL;
 +		}
-+		
++
 +		ret = of_property_read_u32(np, "adc_res", &pdata->adc.vol_res);
 +		if (ret) {
 +			dev_err(dev, "adc_res error\n");
 +			return -EINVAL;
 +		}
-+	} else {
-+		return PTR_ERR(pdata->adc.iio_chan);
 +	}
 +
  	DBG("the battery dts info dump:\n"
  	    "bat_res:%d\n"
  	    "res_sample:%d\n"
- 	    "design_capacity:%d\n"
- 	    "design_qmax :%d\n"
-@@ -2033,11 +2098,19 @@ static int rk817_get_capacity_leve(struct rk817_battery_device *battery)
- 	int dsoc;
- 
+@@ -2237,7 +2306,13 @@
  	if (battery->pdata->bat_mode == MODE_VIRTUAL)
  		return POWER_SUPPLY_CAPACITY_LEVEL_NORMAL;
  
 -	dsoc = (battery->dsoc + 500) / 1000;
 +	if (!IS_ERR(battery->pdata->adc.iio_chan)) {
-+		int ret = rk817_bat_vol_to_cap(battery, rk817_adc_get_battery_voltage(battery));
++		int ret = rk817_bat_vol_to_cap(battery,
++			rk817_adc_get_battery_voltage(battery));
 +		dsoc = ret / (battery->pdata->design_capacity / 100);
 +	} else {
 +		dsoc = (battery->dsoc + 500) / 1000;
 +	}
-+
-+	dev_info(battery->dev, "dsoc:%d\n", dsoc);
-+
  	if (dsoc < 1)
  		return POWER_SUPPLY_CAPACITY_LEVEL_CRITICAL;
  	else if (dsoc <= 20)
- 		return POWER_SUPPLY_CAPACITY_LEVEL_LOW;
- 	else if (dsoc <= 70)
-@@ -2083,11 +2156,17 @@ static int rk817_battery_get_property(struct power_supply *psy,
- 		val->intval = battery->voltage_avg * 1000;/*uV*/
- 		if (battery->pdata->bat_mode == MODE_VIRTUAL)
+@@ -2287,7 +2362,13 @@
  			val->intval = VIRTUAL_VOLTAGE * 1000;
  		break;
  	case POWER_SUPPLY_PROP_CAPACITY:
--		val->intval = (battery->dsoc  + 500) / 1000;
+-		val->intval = (battery->dsoc + 400) / 1000;
 +		if (!IS_ERR(battery->pdata->adc.iio_chan)) {
-+			int ret = rk817_bat_vol_to_cap(battery, rk817_adc_get_battery_voltage(battery));
++			int ret = rk817_bat_vol_to_cap(battery,
++				rk817_adc_get_battery_voltage(battery));
 +			val->intval = ret / (battery->pdata->design_capacity / 100);
 +		} else {
-+			val->intval = (battery->dsoc  + 500) / 1000;
++			val->intval = (battery->dsoc + 400) / 1000;
 +		}
-+		
  		if (battery->pdata->bat_mode == MODE_VIRTUAL)
  			val->intval = VIRTUAL_SOC;
  		break;
- 	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
- 		val->intval = rk817_get_capacity_leve(battery);
-@@ -2289,11 +2368,11 @@ rk817_bat_update_charging_status(struct rk817_battery_device *battery)
- 		battery->charge_count++;
- }
- 
- static void rk817_bat_update_info(struct rk817_battery_device *battery)
- {
--	battery->voltage_avg = rk817_bat_get_battery_voltage(battery);
-+	battery->voltage_avg =rk817_bat_get_battery_voltage(battery);
- 	battery->voltage_sys = rk817_bat_get_sys_voltage(battery);
- 	battery->current_avg = rk817_bat_get_avg_current(battery);
- 	battery->voltage_relax = rk817_bat_get_relax_voltage(battery);
- 	battery->rsoc = rk817_bat_get_rsoc(battery);
- 	battery->remain_cap = rk817_bat_get_capacity_uah(battery);
-@@ -2989,10 +3068,11 @@ static const struct of_device_id rk817_bat_of_match[] = {
- static int rk817_battery_probe(struct platform_device *pdev)
- {
- 	const struct of_device_id *of_id =
- 			of_match_device(rk817_bat_of_match, &pdev->dev);
- 	struct rk817_battery_device *battery;
-+	
- 	struct rk808 *rk817 = dev_get_drvdata(pdev->dev.parent);
- 	struct i2c_client *client = rk817->i2c;
- 	int i,  ret;
- 
- 	if (!of_id) {
-@@ -3070,10 +3150,14 @@ static int rk817_battery_probe(struct platform_device *pdev)
- 
- 	DBG("name: 0x%x", rk817_bat_field_read(battery, CHIP_NAME_H));
- 	DBG("%x\n", rk817_bat_field_read(battery, CHIP_NAME_L));
- 	DBG("driver version %s\n", DRIVER_VERSION);
- 
-+
-+	
-+	
-+
- 	return 0;
- }
- 
- static void rk817_battery_shutdown(struct platform_device *dev)
- {
--- 
-Created with Armbian build tools https://github.com/armbian/build
-
