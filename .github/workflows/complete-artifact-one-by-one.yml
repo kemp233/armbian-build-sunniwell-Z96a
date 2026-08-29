@@ -30,7 +30,7 @@ on:
         - bookworm
         - trixie
         - sid
-        default: 'jammy'
+        default: 'bookworm'
 
       armbian_ui:
         type: choice
@@ -54,6 +54,7 @@ on:
         type: choice
         description: 'Board'
         options:
+        - z96a-v2
         - armsom-sige7
         - armsom-w3
         - bananapi
@@ -254,7 +255,7 @@ on:
         - z96a-rk3568-laptop
         - z96a-rk3568-usb302-laptop
         - z96a-rk3568-usb311-laptop
-        - z96a-v2
+    
 jobs:
 
   build:
