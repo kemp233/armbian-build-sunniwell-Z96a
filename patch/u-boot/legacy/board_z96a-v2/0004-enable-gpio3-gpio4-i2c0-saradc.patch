@@ -1,0 +1,24 @@
+--- a/arch/arm/dts/rk356x-u-boot.dtsi
++++ b/arch/arm/dts/rk356x-u-boot.dtsi
+@@ -170,3 +170,21 @@
+ &xin24m {
+ 	bootph-all;
+ };
++
++/* Z96A full-blood: enable GPIO3/4 (Linux pin 96-159, VBUS EN 110/111 etc.) */
++&gpio3 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++};
++
++&gpio4 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++};
++
++/* I2C0: RK809 + HUSB311 on Z96A V2 */
++&i2c0 {
++	u-boot,dm-pre-reloc;
++	status = "okay";
++	clock-frequency = <100000>;
++};

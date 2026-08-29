@@ -1,0 +1,9 @@
+--- a/arch/arm/mach-rockchip/board.c
++++ b/arch/arm/mach-rockchip/board.c
+@@ -33,6 +33,7 @@
+ #include <asm/io.h>
+ #include <asm/arch-rockchip/boot_mode.h>
+ #include <asm/arch-rockchip/clock.h>
++void rockchip_dnl_mode_check(void);
+ #include <asm/arch-rockchip/periph.h>
+ #include <power/regulator.h>
