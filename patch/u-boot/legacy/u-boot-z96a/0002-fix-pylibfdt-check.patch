@@ -1,0 +1,25 @@
+Fix pylibfdt check by disabling it
+
+pylibfdt is not available in the build environment. Disable the
+check to allow the build to continue using the in-tree dtc.
+--- a/Makefile
++++ b/Makefile
+@@ -2336,11 +2336,11 @@ scripts_dtc: scripts_basic
+ 				echo '*** Your dtc is too old, please upgrade to dtc $(DTC_MIN_VERSION) or newer'; \
+ 				false; \
+ 			else \
+-				if [ -n "$(CONFIG_PYLIBFDT)" ]; then \
+-					if ! echo "import libfdt" | $(PYTHON3) 2>/dev/null; then \
+-						echo '*** pylibfdt does not seem to be available with $(PYTHON3)'; \
+-						false; \
+-					fi; \
+-				fi; \
++				#if [ -n "$(CONFIG_PYLIBFDT)" ]; then \
++				#	if ! echo "import libfdt" | $(PYTHON3) 2>/dev/null; then \
++				#		echo '*** pylibfdt does not seem to be available with $(PYTHON3)'; \
++				#		false; \
++				#	fi; \
++				#fi; \
+ 			fi; \
+ 		fi; \
+ 	fi
