@@ -19,7 +19,7 @@ on:
         - legacy
         - current
         - edge
-        default: 'current'
+        default: 'legacy'
 
       armbian_release:
         type: choice
