@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: kemp233 <kemp233@users.noreply.github.com>
+Date: Sat, 29 Aug 2026 17:30:00 +0000
+Subject: [PATCH] z96a: skip building rk3568-dahua-asi8212a.dtb
+
+The rk3568-dahua-asi8212a.dts in kemp233/linux-rockchip@rk-6.1-rkr6.1
+references labels (rgmii_phy0, rgmii_phy1, gmac1_miim, gmac1_tx_bus2,
+gmac1_rx_bus2, gmac1_rgmii_clk, gmac1_hgmii_bus, vdd_logic) that no
+longer exist in rk3568.dtsi / rk3568-pinctrl.dtsi after a refactor.
+`make dtbs` fails with 8 phandle_references errors and aborts the
+whole kernel build:
+
+  ERROR (phandle_references): /rkvdec@fdf80200: Reference to
+    non-existent node or label "vdd_logic"
+  ERROR (phandle_references): /ethernet@fe010000: Reference to
+    non-existent node or label "rgmii_phy1"
+  ... (8 total)
+  make[1]: *** [Makefile:1473: dtbs] Error 2
+
+dahua is a security access control board (Dahua ASI8212A), unrelated
+to z96a. Skip building its DTB by removing the Makefile entry. The
+.dts source file remains in the tree but is not compiled.
+
+z96a does not need this DTB (it uses its own
+rockchip/rk3568-z96a-laptop-v2.dtb via the dts-directories config).
+---
+ arch/arm64/boot/dts/rockchip/Makefile | 1 -
+ 1 file changed, 1 deletion(-)
+
+diff --git a/arch/arm64/boot/dts/rockchip/Makefile b/arch/arm64/boot/dts/rockchip/Makefile
+--- a/arch/arm64/boot/dts/rockchip/Makefile
++++ b/arch/arm64/boot/dts/rockchip/Makefile
+@@ -248,7 +248,6 @@ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-rock-3a.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-swan1-w28.dtb
+-dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-dahua-asi8212a.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-toybrick-sd0-android.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-toybrick-sd0-linux.dtb
+ dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-toybrick-x0-android.dtb
