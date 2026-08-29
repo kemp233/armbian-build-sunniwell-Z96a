@@ -5,6 +5,15 @@ on:
       - 'main'
     paths:
       - 'config/*.config'
+      - 'config/boards/*.conf'
+      - 'config/boards/*.csc'
+      - 'config/boards/*.wip'
+      - 'config/boards/*.eos'
+      - 'config/boards/*.tvb'
+      - 'config/kernel/*.config'
+      - 'config/sources/families/*.conf'
+      - 'config/bootenv/*.cmd'
+      - 'patch/**'
 
 jobs:
 

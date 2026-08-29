@@ -143,8 +143,22 @@ runs:
         # copy os userpatches and custom
         mkdir -pv build/userpatches
         rsync -av os/userpatches/. build/userpatches/
-        #[[ -d custom/userpatches ]] && 
-        #rsync -av custom/userpatches/. build/userpatches/
+        [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. build/userpatches/
+
+        # copy custom board configs
+        [[ -d custom/config/boards ]] && rsync -av custom/config/boards/. build/config/boards/
+        # copy custom kernel configs
+        [[ -d custom/config/kernel ]] && rsync -av custom/config/kernel/. build/config/kernel/
+        # copy custom bootenv
+        [[ -d custom/config/bootenv ]] && rsync -av custom/config/bootenv/. build/config/bootenv/
+        # copy custom sources
+        [[ -d custom/config/sources ]] && rsync -av custom/config/sources/. build/config/sources/
+        # copy custom patches
+        [[ -d custom/patch ]] && rsync -av custom/patch/. build/patch/
+        # copy custom extensions
+        [[ -d custom/extensions ]] && rsync -av custom/extensions/. build/extensions/
+        # copy custom packages (including blobs)
+        [[ -d custom/packages ]] && rsync -av custom/packages/. build/packages/
 
     - shell: bash
       run: |

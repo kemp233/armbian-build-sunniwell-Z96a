@@ -254,6 +254,7 @@ on:
         - z96a-rk3568-laptop
         - z96a-rk3568-usb302-laptop
         - z96a-rk3568-usb311-laptop
+        - z96a-v2
 jobs:
 
   build:
@@ -261,7 +262,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: momokind/armbian-build@main
+      - uses: ./
         with:
           armbian_token:              "${{secrets.GITHUB_TOKEN}}"
           armbian_target:             "${{inputs.armbian_target}}"
@@ -273,3 +274,4 @@ jobs:
           armbian_release_body:       "Virtual images for x86 and arm64"
           armbian_pgp_key:            "${{secrets.GPG_KEY1}}"
           armbian_pgp_password:       "${{secrets.GPG_PASSPHRASE1}}"
+          armbian_branch:             "main"
