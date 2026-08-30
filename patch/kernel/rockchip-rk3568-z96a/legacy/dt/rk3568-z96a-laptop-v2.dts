@@ -424,7 +424,6 @@
 		mbist-vmin = <0xc96a8 0xdbba0 0xe7ef0>;
 		nvmem-cells = <0x06 0x07 0x08 0x09 0x0a 0x0b>;
 		nvmem-cell-names = "leakage\0pvtm\0mbist-vmin\0opp-info\0specification_serial_number\0remark_spec_serial_number";
-		rockchip,supported-hw;
 		rockchip,max-volt = <0x118c30>;
 		rockchip,pvtm-voltage-sel = <0x00 0x14820 0x00 0x14821 0x153d8 0x01 0x153d9 0x16378 0x02 0x16379 0x186a0 0x03>;
 		rockchip,pvtm-freq = <0x639c0>;
@@ -442,21 +441,18 @@
 		phandle = <0x03>;
 
 		opp-408000000 {
-			opp-supported-hw = <0xfb 0xffff>;
 			opp-hz = <0x00 0x18519600>;
 			opp-microvolt = <0xcf850 0xcf850 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-600000000 {
-			opp-supported-hw = <0xfb 0xffff>;
 			opp-hz = <0x00 0x23c34600>;
 			opp-microvolt = <0xcf850 0xcf850 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-816000000 {
-			opp-supported-hw = <0xfb 0xffff>;
 			opp-hz = <0x00 0x30a32c00>;
 			opp-microvolt = <0xcf850 0xcf850 0x118c30>;
 			clock-latency-ns = <0x9c40>;
@@ -464,78 +460,47 @@
 		};
 
 		opp-1104000000 {
-			opp-supported-hw = <0xfb 0xffff>;
 			opp-hz = <0x00 0x41cdb400>;
 			opp-microvolt = <0xdbba0 0xdbba0 0x118c30>;
 			opp-microvolt-L0 = <0xdbba0 0xdbba0 0x118c30>;
 			opp-microvolt-L1 = <0xcf850 0xcf850 0x118c30>;
 			opp-microvolt-L2 = <0xcf850 0xcf850 0x118c30>;
-			opp-microvolt-L3 = <0xcf850 0xcf850 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-1416000000 {
-			opp-supported-hw = <0xfb 0xffff>;
 			opp-hz = <0x00 0x54667200>;
-			opp-microvolt = <0xfa3e8 0xfa3e8 0x118c30>;
-			opp-microvolt-L0 = <0xfa3e8 0xfa3e8 0x118c30>;
-			opp-microvolt-L1 = <0xee098 0xee098 0x118c30>;
-			opp-microvolt-L2 = <0xe7ef0 0xe7ef0 0x118c30>;
-			opp-microvolt-L3 = <0xe1d48 0xe1d48 0x118c30>;
+			opp-microvolt = <0xf4240 0xf4240 0x118c30>;
+			opp-microvolt-L0 = <0xf4240 0xf4240 0x118c30>;
+			opp-microvolt-L1 = <0xe1d48 0xe1d48 0x118c30>;
+			opp-microvolt-L2 = <0xe1d48 0xe1d48 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-1608000000 {
-			opp-supported-hw = <0xf9 0xffff>;
 			opp-hz = <0x00 0x5fd82200>;
-			opp-microvolt = <0x10c8e0 0x10c8e0 0x118c30>;
-			opp-microvolt-L0 = <0x10c8e0 0x10c8e0 0x118c30>;
-			opp-microvolt-L1 = <0x100590 0x100590 0x118c30>;
-			opp-microvolt-L2 = <0xfa3e8 0xfa3e8 0x118c30>;
-			opp-microvolt-L3 = <0xf4240 0xf4240 0x118c30>;
+			opp-microvolt = <0x106738 0x106738 0x118c30>;
+			opp-microvolt-L0 = <0x106738 0x106738 0x118c30>;
+			opp-microvolt-L1 = <0xf4240 0xf4240 0x118c30>;
+			opp-microvolt-L2 = <0xf4240 0xf4240 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-1800000000 {
-			opp-supported-hw = <0xf9 0xffff>;
 			opp-hz = <0x00 0x6b49d200>;
-			opp-microvolt = <0x118c30 0x118c30 0x118c30>;
-			opp-microvolt-L0 = <0x118c30 0x118c30 0x118c30>;
-			opp-microvolt-L1 = <0x10c8e0 0x10c8e0 0x118c30>;
-			opp-microvolt-L2 = <0x106738 0x106738 0x118c30>;
-			opp-microvolt-L3 = <0x100590 0x100590 0x118c30>;
+			opp-microvolt = <0x112a88 0x112a88 0x118c30>;
+			opp-microvolt-L0 = <0x112a88 0x112a88 0x118c30>;
+			opp-microvolt-L1 = <0x100590 0x100590 0x118c30>;
+			opp-microvolt-L2 = <0x100590 0x100590 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 
 		opp-1992000000 {
-			opp-supported-hw = <0xf9 0xffff>;
 			opp-hz = <0x00 0x76bb8200>;
 			opp-microvolt = <0x118c30 0x118c30 0x118c30>;
 			opp-microvolt-L0 = <0x118c30 0x118c30 0x118c30>;
-			opp-microvolt-L1 = <0x118c30 0x118c30 0x118c30>;
-			opp-microvolt-L2 = <0x112a88 0x112a88 0x118c30>;
-			opp-microvolt-L3 = <0x10c8e0 0x10c8e0 0x118c30>;
-			clock-latency-ns = <0x9c40>;
-		};
-
-		opp-j-1008000000 {
-			opp-supported-hw = <0x04 0xffff>;
-			opp-hz = <0x00 0x3c14dc00>;
-			opp-microvolt = <0xcf850 0xcf850 0x118c30>;
-			clock-latency-ns = <0x9c40>;
-		};
-
-		opp-j-1416000000 {
-			opp-supported-hw = <0x04 0xffff>;
-			opp-hz = <0x00 0x54667200>;
-			opp-microvolt = <0xdbba0 0xdbba0 0x118c30>;
-			clock-latency-ns = <0x9c40>;
-		};
-
-		opp-m-1608000000 {
-			opp-supported-hw = <0x02 0xffff>;
-			opp-hz = <0x00 0x5fd82200>;
-			opp-microvolt = <0xf4240 0xf4240 0x118c30>;
+			opp-microvolt-L1 = <0x10c8e0 0x10c8e0 0x118c30>;
+			opp-microvolt-L2 = <0x106738 0x106738 0x118c30>;
 			clock-latency-ns = <0x9c40>;
 		};
 	};
@@ -1105,13 +1070,13 @@
 			compatible = "rockchip,rk3568-pmu-io-voltage-domain";
 			status = "okay";
 			pmuio1-supply = <0x2f>;
-			pmuio2-supply = <0x30>;
+			pmuio2-supply = <0x34>;
 			vccio1-supply = <0x31>;
 			vccio3-supply = <0x32>;
-			vccio4-supply = <0x30>;
-			vccio5-supply = <0x33>;
-			vccio6-supply = <0x34>;
-			vccio7-supply = <0x33>;
+			vccio4-supply = <0x34>;
+			vccio5-supply = <0x334>;
+			vccio6-supply = <0x334>;
+			vccio7-supply = <0x335>;
 			phandle = <0x16c>;
 		};
 
@@ -1528,29 +1493,42 @@
 				DCDC_REG4 {
 					regulator-always-on;
 					regulator-boot-on;
-					regulator-min-microvolt = <0x325aa0>;
-					regulator-max-microvolt = <0x325aa0>;
+					regulator-min-microvolt = <0x7a120>;
+					regulator-max-microvolt = <0x149970>;
+					regulator-init-microvolt = <0xdbba0>;
+					regulator-ramp-delay = <0x1771>;
 					regulator-initial-mode = <0x02>;
-					regulator-name = "vcc_3v3";
+					regulator-name = "vdd_npu";
 					phandle = <0x33>;
 
 					regulator-state-mem {
-						regulator-on-in-suspend;
-						regulator-suspend-microvolt = <0x325aa0>;
+						regulator-off-in-suspend;
+					};
+				};
+
+				DCDC_REG5 {
+					regulator-always-on;
+					regulator-boot-on;
+					regulator-min-microvolt = <0x1b7740>;
+					regulator-max-microvolt = <0x1b7740>;
+					regulator-name = "vcc_1v8";
+					phandle = <0x334>;
+
+					regulator-state-mem {
+						regulator-off-in-suspend;
 					};
 				};
 
 				LDO_REG1 {
 					regulator-always-on;
 					regulator-boot-on;
-					regulator-min-microvolt = <0x1b7740>;
-					regulator-max-microvolt = <0x1b7740>;
-					regulator-name = "vcca1v8_pmu";
+					regulator-min-microvolt = <0xdbba0>;
+					regulator-max-microvolt = <0xdbba0>;
+					regulator-name = "vdda0v9_image";
 					phandle = <0x30>;
 
 					regulator-state-mem {
-						regulator-on-in-suspend;
-						regulator-suspend-microvolt = <0x1b7740>;
+						regulator-off-in-suspend;
 					};
 				};
 
@@ -1626,7 +1604,7 @@
 					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
-					regulator-name = "vcc_1v8";
+					regulator-name = "vcca_1v8";
 					phandle = <0x10a>;
 
 					regulator-state-mem {
@@ -1639,7 +1617,7 @@
 					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
-					regulator-name = "vcc1v8_dvp";
+					regulator-name = "vcca1v8_pmu";
 					phandle = <0x34>;
 
 					regulator-state-mem {
@@ -1652,8 +1630,30 @@
 					regulator-boot-on;
 					regulator-min-microvolt = <0x1b7740>;
 					regulator-max-microvolt = <0x1b7740>;
-					regulator-name = "vcc2v8_dvp";
+					regulator-name = "vcca1v8_image";
 					phandle = <0x17e>;
+
+					regulator-state-mem {
+						regulator-off-in-suspend;
+					};
+				};
+
+				SWITCH_REG1 {
+					regulator-always-on;
+					regulator-boot-on;
+					regulator-name = "vcc_3v3";
+					phandle = <0x335>;
+
+					regulator-state-mem {
+						regulator-off-in-suspend;
+					};
+				};
+
+				SWITCH_REG2 {
+					regulator-always-on;
+					regulator-boot-on;
+					regulator-name = "vcc3v3_sd";
+					phandle = <0x336>;
 
 					regulator-state-mem {
 						regulator-off-in-suspend;
@@ -1793,7 +1793,6 @@
 			pd_npu@6 {
 				reg = <0x06>;
 				clocks = <0x23 0x27 0x23 0x25 0x23 0x26>;
-				pm_qos = <0x53>;
 			};
 
 			pd_vi@8 {
@@ -1894,7 +1893,6 @@
 		mbist-vmin = <0xc96a8 0xdbba0 0xe7ef0>;
 		nvmem-cells = <0x77 0x07 0x08 0x78 0x0a 0x0b>;
 		nvmem-cell-names = "leakage\0pvtm\0mbist-vmin\0opp-info\0specification_serial_number\0remark_spec_serial_number";
-		rockchip,supported-hw;
 		rockchip,max-volt = <0xf4240>;
 		rockchip,temp-hysteresis = <0x1388>;
 		rockchip,low-temp = <0x00>;
@@ -1905,56 +1903,41 @@
 
 		opp-200000000 {
 			opp-hz = <0x00 0xbebc200>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt = <0xcf850>;
 		};
 
 		opp-300000000 {
 			opp-hz = <0x00 0x11e1a300>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt = <0xcf850>;
 		};
 
 		opp-400000000 {
 			opp-hz = <0x00 0x17d78400>;
-			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt = <0xcf850>;
 		};
 
 		opp-600000000 {
 			opp-hz = <0x00 0x23c34600>;
-			opp-microvolt = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L0 = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L1 = <0xd59f8 0xd59f8 0xf4240>;
-			opp-microvolt-L2 = <0xcf850 0xcf850 0xf4240>;
-			opp-microvolt-L3 = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt = <0xd59f8>;
+			opp-microvolt-L0 = <0xd59f8>;
+			opp-microvolt-L1 = <0xcf850>;
+			opp-microvolt-L2 = <0xcf850>;
 		};
 
 		opp-700000000 {
 			opp-hz = <0x00 0x29b92700>;
-			opp-microvolt = <0xe7ef0 0xe7ef0 0xf4240>;
-			opp-microvolt-L0 = <0xe7ef0 0xe7ef0 0xf4240>;
-			opp-microvolt-L1 = <0xe1d48 0xe1d48 0xf4240>;
-			opp-microvolt-L2 = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L3 = <0xd59f8 0xd59f8 0xf4240>;
+			opp-microvolt = <0xe7ef0>;
+			opp-microvolt-L0 = <0xe7ef0>;
+			opp-microvolt-L1 = <0xdbba0>;
+			opp-microvolt-L2 = <0xcf850>;
 		};
 
 		opp-800000000 {
 			opp-hz = <0x00 0x2faf0800>;
-			opp-microvolt = <0xf4240 0xf4240 0xf4240>;
-			opp-microvolt-L0 = <0xf4240 0xf4240 0xf4240>;
-			opp-microvolt-L1 = <0xee098 0xee098 0xf4240>;
-			opp-microvolt-L2 = <0xe7ef0 0xe7ef0 0xf4240>;
-			opp-microvolt-L3 = <0xe1d48 0xe1d48 0xf4240>;
-		};
-
-		opp-j-600000000 {
-			opp-supported-hw = <0x04 0xffff>;
-			opp-hz = <0x00 0x23c34600>;
-			opp-microvolt = <0xdbba0 0xdbba0 0xf4240>;
-		};
-
-		opp-m-800000000 {
-			opp-supported-hw = <0x02 0xffff>;
-			opp-hz = <0x00 0x2faf0800>;
-			opp-microvolt = <0xe7ef0 0xe7ef0 0xf4240>;
+			opp-microvolt = <0xf4240>;
+			opp-microvolt-L0 = <0xf4240>;
+			opp-microvolt-L1 = <0xe7ef0>;
+			opp-microvolt-L2 = <0xdbba0>;
 		};
 	};
 
@@ -3018,7 +3001,6 @@
 		mbist-vmin = <0xc96a8 0xdbba0 0xe7ef0>;
 		nvmem-cells = <0x84 0x07 0x08 0xae 0x0a 0x0b>;
 		nvmem-cell-names = "leakage\0pvtm\0mbist-vmin\0opp-info\0specification_serial_number\0remark_spec_serial_number";
-		rockchip,supported-hw;
 		rockchip,max-volt = <0xf4240>;
 		rockchip,temp-hysteresis = <0x1388>;
 		rockchip,low-temp = <0x00>;
@@ -3029,17 +3011,10 @@
 		phandle = <0xa8>;
 
 		opp-1560000000 {
-			opp-supported-hw = <0xf9 0xffff>;
 			opp-hz = <0x00 0x5cfbb600>;
-			opp-microvolt = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L0 = <0xdbba0 0xdbba0 0xf4240>;
-			opp-microvolt-L1 = <0xd59f8 0xd59f8 0xf4240>;
-		};
-
-		opp-j-m-1560000000 {
-			opp-supported-hw = <0x06 0xffff>;
-			opp-hz = <0x00 0x5cfbb600>;
-			opp-microvolt = <0xd59f8 0xd59f8 0xf4240>;
+			opp-microvolt = <0xdbba0>;
+			opp-microvolt-L0 = <0xdbba0>;
+			opp-microvolt-L1 = <0xd59f8>;
 		};
 	};
 
@@ -3223,6 +3198,48 @@
 		};
 	};
 
+	bus-npu-opp-table {
+		compatible = "operating-points-v2";
+		opp-shared;
+		nvmem-cells = <0x07>;
+		nvmem-cell-names = "pvtm";
+		rockchip,pvtm-voltage-sel = <0x00 0x14820 0x00 0x14821 0x16378 0x01 0x16379 0x186a0 0x02>;
+		rockchip,pvtm-ch = <0x00 0x05>;
+		phandle = <0x340>;
+
+		opp-700000000 {
+			opp-hz = <0x00 0x29b92700>;
+			opp-microvolt = <0xdbba0>;
+			opp-microvolt-L0 = <0xdbba0>;
+			opp-microvolt-L1 = <0xd59f8>;
+			opp-microvolt-L2 = <0xd59f8>;
+		};
+
+		opp-900000000 {
+			opp-hz = <0x00 0x35a4e900>;
+			opp-microvolt = <0xdbba0>;
+		};
+
+		opp-1000000000 {
+			opp-hz = <0x00 0x3b9aca00>;
+			opp-microvolt = <0xe7ef0>;
+			opp-microvolt-L0 = <0xe7ef0>;
+			opp-microvolt-L1 = <0xe1d48>;
+			opp-microvolt-L2 = <0xdbba0>;
+		};
+	};
+
+	bus-npu {
+		compatible = "rockchip,rk3568-bus";
+		rockchip,busfreq-policy = "clkfreq";
+		clocks = <0x02 0x02>;
+		clock-names = "bus";
+		operating-points-v2 = <0x340>;
+		status = "okay";
+		bus-supply = <0x75>;
+		phandle = <0x341>;
+	};
+
 	npu@fde40000 {
 		compatible = "rockchip,rk3568-rknpu\0rockchip,rknpu";
 		reg = <0x00 0xfde40000 0x00 0x10000>;
@@ -3233,7 +3250,7 @@
 		assigned-clock-rates = <0x23c34600>;
 		resets = <0x23 0x2b 0x23 0x2c>;
 		reset-names = "srst_a\0srst_h";
-		power-domains = <0x25 0x06>;
+		power-domains = <0x25 0x06 0x25 0x06>;
 		operating-points-v2 = <0x33a>;
 		iommus = <0x33b>;
 		status = "okay";
@@ -3267,27 +3284,59 @@
 		phandle = <0x33a>;
 
 		opp-200000000 {
-			opp-hz = <0x00 0x0bef0400>;
-			opp-microvolt = <0xdbba0>;
-			opp-microvolt-L0 = <0xdbba0>;
-			opp-microvolt-L1 = <0xd59f8>;
-			opp-microvolt-L2 = <0xd59f8>;
+			opp-hz = <0x00 0xbebc200>;
+			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
+		};
+
+		opp-300000000 {
+			opp-hz = <0x00 0x11b3dc40>;
+			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
 		};
 
 		opp-400000000 {
 			opp-hz = <0x00 0x17d78400>;
-			opp-microvolt = <0xdbba0>;
-			opp-microvolt-L0 = <0xdbba0>;
-			opp-microvolt-L1 = <0xd59f8>;
-			opp-microvolt-L2 = <0xd59f8>;
+			opp-microvolt = <0xcf850 0xcf850 0xf4240>;
 		};
 
 		opp-600000000 {
 			opp-hz = <0x00 0x23c34600>;
-			opp-microvolt = <0xdbba0>;
-			opp-microvolt-L0 = <0xdbba0>;
-			opp-microvolt-L1 = <0xd59f8>;
-			opp-microvolt-L2 = <0xd59f8>;
+			opp-microvolt = <0xd59f8 0xd59f8 0xf4240>;
+			opp-microvolt-L0 = <0xd59f8 0xd59f8 0xf4240>;
+			opp-microvolt-L1 = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt-L2 = <0xcf850 0xcf850 0xf4240>;
+		};
+
+		opp-700000000 {
+			opp-hz = <0x00 0x29b92700>;
+			opp-microvolt = <0xdbba0 0xdbba0 0xf4240>;
+			opp-microvolt-L0 = <0xdbba0 0xdbba0 0xf4240>;
+			opp-microvolt-L1 = <0xcf850 0xcf850 0xf4240>;
+			opp-microvolt-L2 = <0xcf850 0xcf850 0xf4240>;
+		};
+
+		opp-800000000 {
+			opp-hz = <0x00 0x2faf0800>;
+			opp-microvolt = <0xe1d48 0xe1d48 0xf4240>;
+			opp-microvolt-L0 = <0xe1d48 0xe1d48 0xf4240>;
+			opp-microvolt-L1 = <0xd59f8 0xd59f8 0xf4240>;
+			opp-microvolt-L2 = <0xd59f8 0xd59f8 0xf4240>;
+		};
+
+		opp-900000000 {
+			opp-hz = <0x00 0x35a4e900>;
+			opp-microvolt = <0xee098 0xee098 0xf4240>;
+			opp-microvolt-L0 = <0xee098 0xee098 0xf4240>;
+			opp-microvolt-L1 = <0xe1d48 0xe1d48 0xf4240>;
+			opp-microvolt-L2 = <0xdbba0 0xdbba0 0xf4240>;
+		};
+
+		opp-1000000000 {
+			opp-hz = <0x00 0x3b9aca00>;
+			opp-microvolt = <0xf4240 0xf4240 0xf4240>;
+			opp-microvolt-L0 = <0xf4240 0xf4240 0xf4240>;
+			opp-microvolt-L1 = <0xe7ef0 0xe7ef0 0xf4240>;
+			opp-microvolt-L2 = <0xe1d48 0xe1d48 0xf4240>;
+			status = "disabled";
 		};
 	};
 
@@ -3308,7 +3357,7 @@
 		cap-sd-highspeed;
 		disable-wp;
 		sd-uhs-sdr104;
-		vmmc-supply = <0x33>;
+		vmmc-supply = <0x336>;
 		vqmmc-supply = <0x32>;
 		pinctrl-names = "default";
 		pinctrl-0 = <0xb8 0xb9 0xba 0xbb>;
@@ -4261,7 +4310,7 @@
 		resets = <0x23 0x180>;
 		reset-names = "saradc-apb";
 		status = "okay";
-		vref-supply = <0x10a>;
+		vref-supply = <0x334>;
 		phandle = <0x1dd>;
 	};
 
