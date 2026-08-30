@@ -361,7 +361,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x00>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			#cooling-cells = <0x02>;
@@ -375,7 +375,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x100>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0d>;
@@ -386,7 +386,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x200>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0e>;
@@ -397,7 +397,7 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x00 0x300>;
 			enable-method = "psci";
-			clocks = <0x23 0x00>;
+			clocks = <0x02 0x00>;
 			operating-points-v2 = <0x03>;
 			cpu-idle-states = <0x04>;
 			phandle = <0x0f>;
@@ -3237,6 +3237,7 @@
 		operating-points-v2 = <0x340>;
 		status = "okay";
 		bus-supply = <0x75>;
+		pvtm-supply = <0x175>;
 		phandle = <0x341>;
 	};
 
@@ -7297,7 +7298,7 @@
 	wireless-wlan {
 		compatible = "wlan-platdata";
 		rockchip,grf = <0x3c>;
-		wifi_chip_type = "rtl8821cs";
+		wifi_chip_type = "rtl8822cs";
 		status = "okay";
 		pinctrl-names = "default";
 		pinctrl-0 = <0x139>;
