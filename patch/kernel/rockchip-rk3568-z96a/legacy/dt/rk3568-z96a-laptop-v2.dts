@@ -1685,7 +1685,7 @@
 
 			codec {
 				#sound-dai-cells = <0x01>;
-				compatible = "rockchip,rk809-codec";
+				compatible = "rockchip,rk817-codec";
 				clocks = <0x23 0x1a3>;
 				clock-names = "mclk";
 				assigned-clocks = <0x23 0x1a3 0x23 0x1a6>;
