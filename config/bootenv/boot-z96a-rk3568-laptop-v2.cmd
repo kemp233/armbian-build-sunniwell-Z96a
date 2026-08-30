@@ -7,19 +7,18 @@ setenv load_addr "0x9000000"
 setenv overlay_error "false"
 # default values
 setenv rootdev "/dev/mmcblk0p1"
-setenv verbosity "7"
-setenv console "serial"
+setenv verbosity "1"
+setenv console "both"
 setenv bootlogo "false"
 setenv rootfstype "ext4"
 setenv docker_optimizations "on"
-setenv earlycon "on"
+setenv earlycon "off"
 
 test -n "${distro_bootpart}" || distro_bootpart=1
 
 echo "Boot script loaded from ${devtype} ${devnum}:${distro_bootpart}"
 
-# ---- Z96A: 仿安卓上电, vdd_npu(DCDC_REG4 reg 0xC4) -> 0.9V ----
-# RK809 DCDC4 复位默认 0x00=500mV, NPU 岛在掉电区; U-Boot 阶段写 0x20=900mV
+# ---- Z96A auto-debug: 仿安卓上电, vdd_npu(DCDC_REG4) -> 0.9V ----
 echo "z96a-uboot: setting vdd_npu (DCDC_REG4 reg 0xC4) to 900mV"
 if i2c dev 0; then
 	if i2c probe 20; then
@@ -47,9 +46,9 @@ fi
 
 if test "${logo}" = "disabled"; then setenv logo "logo.nologo"; fi
 
-
-# TTL-only console: never hand primary console to tty1/fbcon
-setenv consoleargs "earlycon=uart8250,mmio32,0xfe660000 console=ttyS2,1500000 console=ttyFIQ0 keep_bootcon"
+if test "${console}" = "display" || test "${console}" = "both"; then setenv consoleargs "console=tty1"; fi
+if test "${console}" = "serial" || test "${console}" = "both"; then setenv consoleargs "console=ttyS2,1500000 ${consoleargs}"; fi
+if test "${earlycon}" = "on"; then setenv consoleargs "earlycon ${consoleargs}"; fi
 if test "${bootlogo}" = "true"; then
 	setenv consoleargs "splash plymouth.ignore-serial-consoles ${consoleargs}"
 else
@@ -59,40 +58,16 @@ fi
 # get PARTUUID of first partition on SD/eMMC the boot script was loaded from
 if test "${devtype}" = "mmc"; then part uuid mmc ${devnum}:${distro_bootpart} partuuid; fi
 
-setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} cpufreq.max_freq=1992000 ubootpart=${partuuid} usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
+setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} ubootpart=${partuuid} usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
 
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1"; fi
-
-# Last console= wins ownership after fiq_debugger / fbcon probe
-setenv bootargs "${bootargs} console=ttyS2,1500000"
-
-# USB VBUS GPIO force removed (thermal: avoid forcing 5V rails)
 
 load ${devtype} ${devnum}:${distro_bootpart} ${ramdisk_addr_r} ${prefix}uInitrd
 load ${devtype} ${devnum}:${distro_bootpart} ${kernel_addr_r} ${prefix}Image
 
 load ${devtype} ${devnum}:${distro_bootpart} ${fdt_addr_r} ${prefix}dtb/${fdtfile}
 fdt addr ${fdt_addr_r}
-fdt resize 131072
-
-# Z96A-HAL safety net: force CPU clocks to SCMI protocol@14 clk0
-# (Kernel DTS should already match; this guards tree regressions)
-echo "Z96A-HAL: cpu clocks -> SCMI clk0"
-fdt set /cpus/cpu@0 clocks <0x02 0x00> || true
-fdt set /cpus/cpu@100 clocks <0x02 0x00> || true
-fdt set /cpus/cpu@200 clocks <0x02 0x00> || true
-fdt set /cpus/cpu@300 clocks <0x02 0x00> || true
-
-
-
-fdt set /vcc5v0-usb status "okay"
-fdt set /vcc5v0-host-regulator status "okay"
-fdt set /vcc5v0-otg-regulator status "okay"
-fdt set /usbdrd status "okay"
-fdt set /usbdrd/dwc3@fcc00000 status "okay"
-fdt set /usbhost status "okay"
-fdt set /usbhost/dwc3@fd000000 status "okay"
-
+fdt resize 65536
 for overlay_file in ${overlays}; do
 	if load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}dtb/rockchip/overlay/${overlay_prefix}-${overlay_file}.dtbo; then
 		echo "Applying kernel provided DT overlay ${overlay_prefix}-${overlay_file}.dtbo"
@@ -119,8 +94,6 @@ else
 		source ${load_addr}
 	fi
 fi
-
-echo "Final bootargs: ${bootargs}"
 kaslrseed
 booti ${kernel_addr_r} ${ramdisk_addr_r} ${fdt_addr_r}
 
