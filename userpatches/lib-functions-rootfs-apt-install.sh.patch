@@ -1,0 +1,10 @@
+--- a/lib/functions/rootfs/apt-install.sh
++++ b/lib/functions/rootfs/apt-install.sh
+@@ -103,7 +103,7 @@ install_deb_chroot() {
+ 
+ 	# install package
+ 	run_host_command_logged apt-get install -y \
+-		--no-install-recommends \
++		--allow-downgrades --no-install-recommends \
+ 		"${package_file}"
+ }
