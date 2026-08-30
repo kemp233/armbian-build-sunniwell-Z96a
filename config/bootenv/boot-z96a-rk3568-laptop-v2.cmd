@@ -18,6 +18,28 @@ test -n "${distro_bootpart}" || distro_bootpart=1
 
 echo "Boot script loaded from ${devtype} ${devnum}:${distro_bootpart}"
 
+# ---- Z96A: 仿安卓上电, vdd_npu(DCDC_REG4 reg 0xC4) -> 0.9V ----
+# RK809 DCDC4 复位默认 0x00=500mV, NPU 岛在掉电区; U-Boot 阶段写 0x20=900mV
+echo "z96a-uboot: setting vdd_npu (DCDC_REG4 reg 0xC4) to 900mV"
+if i2c dev 0; then
+	if i2c probe 20; then
+		echo "z96a-uboot: PMIC found on bus 0, reg C4 before:"
+		i2c md 20 C4 1
+		i2c mw 20 C4 20
+		echo "z96a-uboot: bus 0 written, reg C4 after:"
+		i2c md 20 C4 1
+	fi
+fi
+if i2c dev 1; then
+	if i2c probe 20; then
+		echo "z96a-uboot: PMIC found on bus 1, reg C4 before:"
+		i2c md 20 C4 1
+		i2c mw 20 C4 20
+		echo "z96a-uboot: bus 1 written, reg C4 after:"
+		i2c md 20 C4 1
+	fi
+fi
+
 if test -e ${devtype} ${devnum}:${distro_bootpart} ${prefix}armbianEnv.txt; then
 	load ${devtype} ${devnum}:${distro_bootpart} ${load_addr} ${prefix}armbianEnv.txt
 	env import -t ${load_addr} ${filesize}

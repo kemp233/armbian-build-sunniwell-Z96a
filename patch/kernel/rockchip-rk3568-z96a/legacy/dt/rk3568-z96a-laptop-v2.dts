@@ -3250,7 +3250,9 @@
 		assigned-clock-rates = <0x23c34600>;
 		resets = <0x23 0x2b 0x23 0x2c>;
 		reset-names = "srst_a\0srst_h";
+		power-domains = <0x25 0x06 0x25 0x06>;
 		operating-points-v2 = <0x33a>;
+		iommus = <0x33b>;
 		status = "okay";
 		rknpu-supply = <0x33>;
 		phandle = <0x33c>;
@@ -3265,7 +3267,7 @@
 		clock-names = "aclk\0iface";
 		power-domains = <0x25 0x06>;
 		#iommu-cells = <0x00>;
-		status = "disabled";
+		status = "okay";
 		phandle = <0x33b>;
 	};
 
