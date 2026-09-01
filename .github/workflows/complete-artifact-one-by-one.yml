@@ -55,6 +55,7 @@ on:
         description: 'Board'
         options:
         - z96a-v2
+        - lb2004-rk3566
         - armsom-sige7
         - armsom-w3
         - bananapi
