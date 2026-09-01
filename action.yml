@@ -151,6 +151,8 @@ runs:
         [[ -d custom/config/kernel ]] && rsync -av custom/config/kernel/. build/config/kernel/
         # copy custom bootenv
         [[ -d custom/config/bootenv ]] && rsync -av custom/config/bootenv/. build/config/bootenv/
+        # copy custom bootscripts (z96a-specific boot.cmd must be deployed for vdd_npu init)
+        [[ -d custom/config/bootscripts ]] && rsync -av custom/config/bootscripts/. build/config/bootscripts/
         # copy custom sources
         [[ -d custom/config/sources ]] && rsync -av custom/config/sources/. build/config/sources/
         # copy custom patches
