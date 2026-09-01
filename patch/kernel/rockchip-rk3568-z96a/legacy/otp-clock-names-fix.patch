@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Agent <agent@local>
+Date: Sun, 1 Sep 2024 00:00:00 +0000
+Subject: nvmem: rockchip-otp: fix rk3568 clock names to match clock driver
+Signed-off-by: Agent <agent@local>
+---
+ drivers/nvmem/rockchip-otp.c | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/nvmem/rockchip-otp.c b/drivers/nvmem/rockchip-otp.c
+index cbdfffe12d61..e0b3628d5ba8 100644
+--- a/drivers/nvmem/rockchip-otp.c
++++ b/drivers/nvmem/rockchip-otp.c
+@@ -784,7 +784,7 @@ static const struct rockchip_data rk3528_data = {
+ };
+ 
+ static const char * const rk3568_otp_clocks[] = {
+-	"usr", "sbpi", "apb", "phy",
++	"clk_otpc_ns_usr", "clk_otpc_ns_sbpi", "pclk_otpc_ns", "pclk_otpphy",
+ };
+ 
+ static const struct rockchip_data rk3562_data = {
+-- 
+2.34.1
+
