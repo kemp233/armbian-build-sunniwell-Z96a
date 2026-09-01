@@ -88,6 +88,9 @@ function create_new_rootfs_cache_via_debootstrap() {
 
 	deboostrap_arguments+=("--foreign") # release name
 
+	# Workaround for old debian-archive-keyring in Docker image missing
+	# newer release signing keys (e.g. F8D2585B8783D481 for bookworm)
+	deboostrap_arguments+=("--no-check-gpg")
 	deboostrap_arguments+=("${RELEASE}" "${SDCARD}/" "${debootstrap_apt_mirror}") # release, path and mirror; always last, positional arguments.
 
 	run_host_command_logged debootstrap "${deboostrap_arguments[@]}" || {
