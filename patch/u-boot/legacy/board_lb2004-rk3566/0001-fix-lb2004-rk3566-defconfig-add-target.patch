@@ -1,5 +1,10 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: kemp233 <kemp233@users.noreply.github.com>
+Date: Tue, 1 Sep 2026 13:00:00 +0000
 Subject: [PATCH] fix(lb2004-rk3566): add CONFIG_TARGET_EVB_RK3568 to defconfig
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
 The kemp233/u-boot-1@rockchip-v2026.01 lb2004-rk3566_defconfig is
 incomplete - it does not set CONFIG_TARGET_EVB_RK3568=y, which is
@@ -12,18 +17,6 @@ olddefconfig" with:
 The fix is to explicitly set CONFIG_TARGET_EVB_RK3568=y in the defconfig.
 This is the same TARGET used by z96a (which also runs on rk3568 board
 framework since rk3566 and rk3568 share the same SoC IP block).
-
-The choice of TARGET_EVB_RK3568 is correct because:
-  - LB2004 uses RK3566 (die-shrink of RK3568)
-  - rk3566.dtsi and rk3568.dtsi share the same SoC IP block
-  - CONFIG_ROCKCHIP_RK3568=y enables the same driver code for both
-  - The DEFAULT_DEVICE_TREE=rockchip/rk3566-lb2004 selects the rk3566 DTS
-  - The evb_rk3568 board file (board/rockchip/evb_rk3568/evb_rk3568.c)
-    is a minimal RK356x reference board; we reuse it for lb2004
-
-The kemp233/u-boot-1 fork also has more z96a-specific CONFIG options in
-z96a-rk3568-laptop-v2_defconfig (CMD_ROCKUSB, BOOTDELAY=3, ADC, etc.)
-that lb2004 doesn't need yet. They can be added later if needed.
 
 ---
  configs/lb2004-rk3566_defconfig | 1 +
@@ -39,3 +32,6 @@ that lb2004 doesn't need yet. They can be added later if needed.
  CONFIG_ARCH_ROCKCHIP=y
  CONFIG_SF_DEFAULT_SPEED=24000000
  CONFIG_SF_DEFAULT_MODE=0x2000
+-- 
+2.30.0
+
