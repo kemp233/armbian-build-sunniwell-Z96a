@@ -1338,7 +1338,7 @@
 			temp_res_up = <0x2710>;
 			low_temp_off = <0x00>;
 			high_temp_off = <0x2b>;
-			status = "okay";
+			status = "disabled";
 			phandle = <0x176>;
 		};
 
@@ -1752,7 +1752,7 @@
 				io-channel-names = "battery-chan-5";
 				enough-led-ctl-gpios = <0x41 0x1e 0x00>;
 				charging-led-ctl-gpios = <0x41 0x1d 0x00>;
-				status = "okay";
+				status = "disabled";
 			};
 		};
 	};
@@ -7039,6 +7039,21 @@
 				phandle = <0x135>;
 			};
 
+			z96a-keyboard-pwr2 {
+				rockchip,pins = <0x02 0x1f 0x00 0x116>;
+				phandle = <0x410>;
+			};
+
+			vcc5v0-usb2-host1-en2 {
+				rockchip,pins = <0x04 0x0b 0x00 0x116>;
+				phandle = <0x411>;
+			};
+
+			vcc5v0-usb2-host2-en2 {
+				rockchip,pins = <0x04 0x09 0x00 0x116>;
+				phandle = <0x412>;
+			};
+
 			z96a-camera-pwr {
 				rockchip,pins = <0x02 0x10 0x00 0x11f>;
 				phandle = <0x136>;
@@ -7326,6 +7341,8 @@
 
 	vcc5v0-otg-regulator {
 		compatible = "regulator-fixed";
+		/* Z96A: disabled - forced OTG VBUS boost fights the adapter */
+		status = "disabled";
 		regulator-name = "vcc5v0_otg";
 		regulator-always-on;
 		regulator-boot-on;
@@ -7342,9 +7359,10 @@
 
 	z96a-keyboad-vcc {
 		compatible = "regulator-fixed";
-		gpio = <0x41 0x15 0x00>;
+		/* Z96A factory (Android boot-0.dts): keyboard 5V EN = gpio2_D7 */
+		gpio = <0x132 0x1f 0x00>;
 		pinctrl-names = "default";
-		pinctrl-0 = <0x135>;
+		pinctrl-0 = <0x410>;
 		regulator-name = "z96a_keyboad_vcc";
 		enable-active-high;
 		regulator-always-on;
@@ -7362,6 +7380,37 @@
 		regulator-always-on;
 		regulator-boot-on;
 		phandle = <0x320>;
+	};
+
+	/* Z96A factory rails (Android boot-0.dts vcc5v0-usb2-host1/2) */
+	vcc5v0-usb2-host1 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb2_host1";
+		regulator-min-microvolt = <0x4c4b40>;
+		regulator-max-microvolt = <0x4c4b40>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+		gpio = <0x1e4 0x0b 0x00>;
+		vin-supply = <0x12f>;
+		pinctrl-names = "default";
+		pinctrl-0 = <0x411>;
+		phandle = <0x413>;
+	};
+
+	vcc5v0-usb2-host2 {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_usb2_host2";
+		regulator-min-microvolt = <0x4c4b40>;
+		regulator-max-microvolt = <0x4c4b40>;
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+		gpio = <0x1e4 0x09 0x00>;
+		vin-supply = <0x12f>;
+		pinctrl-names = "default";
+		pinctrl-0 = <0x412>;
+		phandle = <0x414>;
 	};
 
 	sdio-pwrseq {
@@ -7427,7 +7476,7 @@
 		status = "okay";
 		// power-supply = <0x125>;  // disabled: violent mux handles LCD power
         power-supply = <0x125>;
-		enable-gpios = <0x41 0x03 0x00>;
+	/* enable-gpios removed: GPIO0_A3 is the RK809 INT pin */
 		bus-format = <0x100a>;
 		bpc = <0x08>;
 		width-mm = <0x135>;
