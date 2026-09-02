@@ -161,7 +161,7 @@ runs:
         # to be in momokind/armbian-build's lib/, e.g. rootfs/debootstrap
         # keyring workarounds). Only files present in custom/lib/ are
         # copied; existing momokind files not overridden are kept.
-        [[ -d custom/lib ]] && rsync -av --ignore-existing custom/lib/. build/lib/
+        [[ -d custom/lib ]] && rsync -av custom/lib/. build/lib/
         # remove stale patches superseded by kernel-fork commits (rk817 battery IIO
         # support lives in kemp233/linux-rockchip rk-6.1-rkr5.1; the stale copy in
         # the build framework fork double-applies and breaks kernel patching)
