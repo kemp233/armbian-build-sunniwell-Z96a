@@ -1,0 +1,90 @@
+From 55db5dac0a9f1fc022f8cb50068e3126b87df121 Mon Sep 17 00:00:00 2001
+From: kemp233 <kemp233@users.noreply.github.com>
+Date: Wed, 2 Sep 2026 10:22:59 +0800
+Subject: [PATCH] fix(rockchip): keep board_init() dnl check DM-free
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+rockchip_dnl_mode_check() does full DM ADC/BUTTON reads (I2C/SARADC
+probe) and that runs from board_init() because board.c calls it there.
+On boards that don't have a perfectly clean I2C/SARADC boot-time probe
+(Z96A RK3568) the early DM probe can block/retry so much that the
+console appears to hang and boot stalls after 'Working FDT set to ...'
+(console prints at a fraction of normal speed). The full check is
+still needed, just later.
+
+Replace the board_init() call with a new weak rockchip_dnl_early_check()
+hook (default: no-op, DM-free). The full rockchip_dnl_mode_check() now
+runs only in setup_boot_mode() during board_late_init(), where DM,
+console and CLI are all up — exactly the conditions it needs.
+
+Fixes: Z96A post-456d051 boot slowdown (was taking 30s+ to reach
+'Loading init Ramdisk' and looked like a hang).
+---
+ arch/arm/include/asm/arch-rockchip/boot_mode.h |  1 +
+ arch/arm/mach-rockchip/board.c                 | 12 ++++++++++--
+ arch/arm/mach-rockchip/boot_mode.c             | 12 ++++++++++++
+ 3 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/include/asm/arch-rockchip/boot_mode.h b/arch/arm/include/asm/arch-rockchip/boot_mode.h
+index 70641f4d..570a5889 100644
+--- a/arch/arm/include/asm/arch-rockchip/boot_mode.h
++++ b/arch/arm/include/asm/arch-rockchip/boot_mode.h
+@@ -21,6 +21,7 @@
+ #ifndef __ASSEMBLY__
+ int setup_boot_mode(void);
+ void rockchip_dnl_mode_check(void);
++int rockchip_dnl_early_check(void);
+ #endif
+ 
+ #endif
+diff --git a/arch/arm/mach-rockchip/board.c b/arch/arm/mach-rockchip/board.c
+index 1798683f..016dd05e 100644
+--- a/arch/arm/mach-rockchip/board.c
++++ b/arch/arm/mach-rockchip/board.c
+@@ -202,8 +202,16 @@ int board_late_init(void)
+ 
+ int board_init(void)
+ {
+-	/* Factory Recovery/volume-up: check early, not only board_late_init */
+-	rockchip_dnl_mode_check();
++	/*
++	 * Do NOT call rockchip_dnl_mode_check() here: console/env/CLI are
++	 * not up yet and its ADC/BUTTON reads trigger full DM I2C/SARADC
++	 * probe, which on Z96A (and similar boards) hangs or slows the
++	 * main boot path to a crawl. The real check is deferred to
++	 * setup_boot_mode() via the weak rockchip_dnl_early_check()
++	 * hook below; boards that need a very-early check can override
++	 * it without touching DM devices.
++	 */
++	rockchip_dnl_early_check();
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-rockchip/boot_mode.c b/arch/arm/mach-rockchip/boot_mode.c
+index 8f5113e5..4a341e30 100644
+--- a/arch/arm/mach-rockchip/boot_mode.c
++++ b/arch/arm/mach-rockchip/boot_mode.c
+@@ -38,6 +38,18 @@ void set_back_to_bootrom_dnl_flag(void)
+ #define KEY_DOWN_MIN_VAL	0
+ #define KEY_DOWN_MAX_VAL	30
+ 
++__weak int rockchip_dnl_early_check(void)
++{
++	/*
++	 * Called from board_init(): this MUST NOT touch any DM device
++	 * (ADC/BUTTON I2C/SARADC probes are deferred). The default
++	 * implementation does nothing; the full check is performed later
++	 * in setup_boot_mode() via rockchip_dnl_mode_check(), where
++	 * DM/console/env are all up.
++	 */
++	return 0;
++}
++
+ __weak int rockchip_dnl_key_pressed(void)
+ {
+ 	/*
+-- 
+2.43.0
+
