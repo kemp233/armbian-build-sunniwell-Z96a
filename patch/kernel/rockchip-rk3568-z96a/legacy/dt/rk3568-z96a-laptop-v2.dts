@@ -7341,8 +7341,12 @@
 
 	vcc5v0-otg-regulator {
 		compatible = "regulator-fixed";
-		/* Z96A: disabled - forced OTG VBUS boost fights the adapter */
-		status = "disabled";
+		/* Z96A: KEEP ENABLED (always-on). Bench fact: the NIC behind
+		 * the OTG controller is powered from this rail - disabling it
+		 * (v6 test) killed the NIC in every power configuration. The
+		 * charger-plugged VSYS sag that previously killed the NIC is
+		 * addressed at the source instead (SC8886 charge current 1A
+		 * programmed by U-Boot, u-boot-1 aebd0dc2+). */
 		regulator-name = "vcc5v0_otg";
 		regulator-always-on;
 		regulator-boot-on;
