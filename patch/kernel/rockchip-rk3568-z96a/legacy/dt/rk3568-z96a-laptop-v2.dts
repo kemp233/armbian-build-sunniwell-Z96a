@@ -3525,7 +3525,7 @@
 		#address-cells = <0x01>;
 		#size-cells = <0x01>;
 		clocks = <0x23 0x73 0x23 0x72 0x23 0x71 0x23 0x181>;
-		clock-names = "usr\0sbpi\0apb\0phy";
+		clock-names = "clk_otpc_ns_usr\0clk_otpc_ns_sbpi\0pclk_otpc_ns\0pclk_otpphy";
 		resets = <0x23 0x1cf>;
 		reset-names = "otp_phy";
 		phandle = <0x1b6>;
