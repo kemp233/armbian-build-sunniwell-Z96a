@@ -1752,7 +1752,7 @@
 				io-channel-names = "battery-chan-5";
 				enough-led-ctl-gpios = <0x41 0x1e 0x00>;
 				charging-led-ctl-gpios = <0x41 0x1d 0x00>;
-				status = "disabled";
+				status = "okay";
 			};
 		};
 	};
