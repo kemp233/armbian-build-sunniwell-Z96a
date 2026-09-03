@@ -1338,7 +1338,7 @@
 			temp_res_up = <0x2710>;
 			low_temp_off = <0x00>;
 			high_temp_off = <0x2b>;
-			status = "disabled";
+			status = "okay";
 			phandle = <0x176>;
 		};
 
