@@ -6863,7 +6863,7 @@
 
 			spi1m1-cs0 {
 				rockchip,pins = <0x03 0x01 0x03 0x11d>;
-				phandle = <0x300>;
+				phandle = <0x401>;
 			};
 		};
 
@@ -7205,6 +7205,16 @@
 		};
 	};
 
+	vcc5v0_main {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc5v0_main";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <0x4c4b40>;
+		regulator-max-microvolt = <0x4c4b40>;
+		phandle = <0x500>;
+	};
+
 	dc-12v {
 		compatible = "regulator-fixed";
 		regulator-name = "dc_12v";
@@ -7222,7 +7232,7 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x325aa0>;
 		regulator-max-microvolt = <0x325aa0>;
-		vin-supply = <0x129>;
+		vin-supply = <0x500>;
 		phandle = <0x44>;
 	};
 
@@ -7298,7 +7308,7 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x325aa0>;
 		regulator-max-microvolt = <0x325aa0>;
-		vin-supply = <0x129>;
+		vin-supply = <0x500>;
 		phandle = <0x134>;
 	};
 
@@ -7309,7 +7319,7 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
-		vin-supply = <0x129>;
+		vin-supply = <0x500>;
 		phandle = <0x12f>;
 	};
 
