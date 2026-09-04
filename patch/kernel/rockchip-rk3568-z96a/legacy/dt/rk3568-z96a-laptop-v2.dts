@@ -907,7 +907,10 @@
 			compatible = "snps,dwc3";
 			reg = <0x00 0xfcc00000 0x00 0x400000>;
 			interrupts = <0x00 0xa9 0x04>;
-			dr_mode = "host";
+			dr_mode = "otg";
+			extcon = <&usb_con>;
+			usb-role-switch;
+			orientation-switch;
 			phys = <0x28 0x24 0x04>;
 			phy-names = "usb2-phy\0usb3-phy";
 			phy_type = "utmi_wide";
@@ -1338,11 +1341,20 @@
 			temp_res_up = <0x2710>;
 			low_temp_off = <0x00>;
 			high_temp_off = <0x2b>;
+			extcon = <&usb_con>, <&usb_con>;
+			ti,usb-charger = <&husb311_chg>;
 			status = "okay";
 			phandle = <0x176>;
+			regulators {
+				otg-vbus {
+					regulator-name = "otg-vbus";
+					regulator-min-microvolt = <5000000>;
+					regulator-max-microvolt = <5000000>;
+				};
+			};
 		};
 
-		husb311@4e {
+		husb311_chg: husb311@4e {
 			compatible = "hynetek,husb311";
 			reg = <0x4e>;
 			pinctrl-names = "default";
@@ -1371,7 +1383,7 @@
 				};
 			};
 
-			connector {
+			usb_con: connector {
 				compatible = "usb-c-connector";
 				label = "USB-C";
 				power-role = "sink";
