@@ -7224,6 +7224,7 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
+		vin-supply = <0x129>;
 		phandle = <0x500>;
 	};
 
