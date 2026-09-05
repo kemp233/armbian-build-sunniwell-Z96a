@@ -7417,8 +7417,6 @@
 		compatible = "mmc-pwrseq-simple";
 		clocks = <0x137 0x01>;
 		clock-names = "ext_clock";
-		pinctrl-names = "default";
-		pinctrl-0 = <0x138>;
 		reset-gpios = <0x41 0x10 0x01>;
 		phandle = <0xbc>;
 	};
@@ -7523,6 +7521,7 @@
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_lcd0_n";
 		regulator-boot-on;
+		regulator-always-on;
 		regulator-min-microvolt = <0x325aa0>;
 		regulator-max-microvolt = <0x325aa0>;
 		enable-active-high;
