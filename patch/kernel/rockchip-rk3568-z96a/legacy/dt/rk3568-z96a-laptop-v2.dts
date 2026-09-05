@@ -3321,7 +3321,7 @@
 	npu-opp-table {
 		compatible = "operating-points-v2";
 		mbist-vmin = <0xc96a8 0xdbba0 0xe7ef0>;
-		nvmem-cells = <0x34a 0x07 0x08>;
+		nvmem-cells = <0x72 0x07 0x08>;
 		nvmem-cell-names = "leakage\0pvtm\0mbist-vmin";
 		rockchip,temp-hysteresis = <0x1388>;
 		rockchip,low-temp = <0x00>;
@@ -6998,7 +6998,7 @@
 		sdio-pwrseq {
 
 			wifi-enable-h {
-				rockchip,pins = <0x00 0x11 0x00 0x116>;
+				rockchip,pins = <0x00 0x10 0x00 0x119>;
 				phandle = <0x138>;
 			};
 		};
@@ -7417,6 +7417,8 @@
 		compatible = "mmc-pwrseq-simple";
 		clocks = <0x137 0x01>;
 		clock-names = "ext_clock";
+		pinctrl-names = "default";
+		pinctrl-0 = <0x138>;
 		reset-gpios = <0x41 0x10 0x01>;
 		phandle = <0xbc>;
 	};
