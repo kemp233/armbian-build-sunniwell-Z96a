@@ -74,19 +74,14 @@ jobs:
             make ARCH=arm64 defconfig
           fi
           # Ensure NPU/DRM/devfreq configs needed by z96a
-          cat >> .config << 'EOCF'
-CONFIG_DRM_PANFROST=y
-CONFIG_ROCKCHIP_THERMAL=y
-CONFIG_ROCKCHIP_SARADC=y
-CONFIG_CHARGER_BQ25700=y
-CONFIG_BATTERY_RK817=y
-CONFIG_ARCH_ROCKCHIP=y
-CONFIG_ARM_ROCKCHIP_CPUFREQ=y
-CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
-CONFIG_PM_DEVFREQ=y
-CONFIG_ROCKCHIP_PM_DOMAINS=y
-CONFIG_RK_VIDEC_TEST=n
-EOCF
+          for opt in CONFIG_DRM_PANFROST=y CONFIG_ROCKCHIP_THERMAL=y \
+                     CONFIG_ROCKCHIP_SARADC=y CONFIG_CHARGER_BQ25700=y \
+                     CONFIG_BATTERY_RK817=y CONFIG_ARCH_ROCKCHIP=y \
+                     CONFIG_ARM_ROCKCHIP_CPUFREQ=y \
+                     CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y \
+                     CONFIG_PM_DEVFREQ=y CONFIG_ROCKCHIP_PM_DOMAINS=y; do
+            grep -q "^${opt}=" .config || echo "${opt}" >> .config
+          done
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
       - name: Build Image + dtbs
