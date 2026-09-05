@@ -1,0 +1,137 @@
+name: Build Z96A v2 kernel (safe8 dtb fixes)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['main']
+    paths:
+      - 'patch/kernel/rockchip-rk3568-z96a/**'
+      - '.github/workflows/build-z96a-kernel.yml'
+
+jobs:
+  build-kernel:
+    name: Build kernel + dtbs for z96a-v2
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout armbian-build (for patches/configs)
+        uses: actions/checkout@v4
+        with:
+          path: armbian-build
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: kemp233/linux-rockchip
+          ref: rk-6.1-rkr5.1
+          path: linux-src
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            build-essential bison flex bc libssl-dev libncurses-dev \
+            python3 device-tree-compiler u-boot-tools kmod cpio rsync \
+            swig libgnutls28-dev lzop
+
+      - name: Apply kernel patches
+        working-directory: linux-src
+        run: |
+          # Apply z96a kernel patches from armbian-build
+          PATCHDIR="${GITHUB_WORKSPACE}/armbian-build/patch/kernel/rockchip-rk3568-z96a/legacy"
+          echo "=== Applying patches from ${PATCHDIR} ==="
+          for p in "${PATCHDIR}"/*.patch; do
+            [ -e "$p" ] || continue
+            echo "--- $(basename $p) ---"
+            if git apply --check "$p" 2>/dev/null; then
+              git apply "$p" && echo "applied" || echo "FAILED"
+            elif git apply --check --3way "$p" 2>/dev/null; then
+              git apply --3way "$p" && echo "applied (3way)" || echo "FAILED (3way)"
+            else
+              echo "skipped (does not apply)"
+            fi
+          done
+
+          # Copy board dts from patch dir (dts-directories mechanism)
+          DTDIR="${PATCHDIR}/dt"
+          if [ -d "$DTDIR" ]; then
+            cp -v "$DTDIR"/*.dts arch/arm64/boot/dts/rockchip/ || true
+          fi
+          # Ensure dts is in Makefile (usually already covered by Rockchip entry)
+          grep -q "rk3568-z96a-laptop-v2" arch/arm64/boot/dts/rockchip/Makefile || \
+            echo 'dtb-$(CONFIG_ARCH_ROCKCHIP) += rk3568-z96a-laptop-v2.dtb' >> arch/arm64/boot/dts/rockchip/Makefile
+
+      - name: Prepare kernel config
+        working-directory: linux-src
+        run: |
+          # Base config from armbian-build
+          CFG="${GITHUB_WORKSPACE}/armbian-build/config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
+          if [ -f "$CFG" ]; then
+            cp "$CFG" .config
+          else
+            make ARCH=arm64 defconfig
+          fi
+          # Ensure NPU/DRM/devfreq configs needed by z96a
+          cat >> .config << 'EOCF'
+CONFIG_DRM_PANFROST=y
+CONFIG_ROCKCHIP_THERMAL=y
+CONFIG_ROCKCHIP_SARADC=y
+CONFIG_CHARGER_BQ25700=y
+CONFIG_BATTERY_RK817=y
+CONFIG_ARCH_ROCKCHIP=y
+CONFIG_ARM_ROCKCHIP_CPUFREQ=y
+CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y
+CONFIG_PM_DEVFREQ=y
+CONFIG_ROCKCHIP_PM_DOMAINS=y
+CONFIG_RK_VIDEC_TEST=n
+EOCF
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+
+      - name: Build Image + dtbs
+        working-directory: linux-src
+        run: |
+          export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+          JOBS=$(nproc)
+          echo "Building with -j${JOBS}"
+          make -j${JOBS} Image dtbs
+
+      - name: Build modules
+        working-directory: linux-src
+        run: |
+          export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+          make -j$(nproc) modules
+          export INSTALL_MOD_PATH=${GITHUB_WORKSPACE}/modules-out
+          make modules_install
+          cd ${GITHUB_WORKSPACE}/modules-out
+          tar czf ${GITHUB_WORKSPACE}/modules.tar.gz .
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p out
+          cp linux-src/arch/arm64/boot/Image out/Image
+          cp linux-src/arch/arm64/boot/dts/rockchip/rk3568-z96a-laptop-v2.dtb out/
+          cp modules.tar.gz out/
+          ls -la out/
+          md5sum out/* | tee out/md5sums.txt
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: z96a-v2-kernel-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload bootfs-ready bundle
+        run: |
+          # 额外生成一个"直接可替换"包: Image + dtb (放进 /boot 即可)
+          cd out
+          tar czf z96a-boot-update.tar.gz Image rk3568-z96a-laptop-v2.dtb
+          rm -f Image rk3568-z96a-laptop-v2.dtb modules.tar.gz md5sums.txt
+          mv ../modules.tar.gz . 2>/dev/null || true
+          mv z96a-boot-update.tar.gz .. 2>/dev/null || true
+          ls -la
+        working-directory: out
+        continue-on-error: true
