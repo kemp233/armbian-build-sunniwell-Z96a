@@ -1,0 +1,404 @@
+diff --git a/drivers/power/supply/Kconfig b/drivers/power/supply/Kconfig
+index 80cf2731036f..8c0e5d533187 100644
+--- a/drivers/power/supply/Kconfig
++++ b/drivers/power/supply/Kconfig
+@@ -752,6 +752,13 @@ config CHARGER_BQ25700
+ 	help
+ 	  Say Y to enable support for the TI BQ25700 battery charger.
+ 
++config CHARGER_SC8886S
++	tristate "SouthChip SC8886S battery charger driver (Z96A)"
++	depends on REGMAP_I2C
++	help
++	  Say Y to enable support for the SouthChip SC8886S battery
++	  charger IC, used in Z96A RK3568 laptop boards.
++
+ config CHARGER_BQ25890
+ 	tristate "TI BQ25890 battery charger driver"
+ 	depends on I2C
+diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+index 4a8b488c7837..f4ed828d0c27 100644
+--- a/drivers/power/supply/Makefile
++++ b/drivers/power/supply/Makefile
+@@ -122,4 +122,5 @@ obj-$(CONFIG_BATTERY_SURFACE)	+= surface_battery.o
+ obj-$(CONFIG_CHARGER_SURFACE)	+= surface_charger.o
+ obj-$(CONFIG_BATTERY_UG3105)	+= ug3105_battery.o
+ 
+-obj-$(CONFIG_NANOPI_ADC_POWER)	+= nanopi_adc_power.o
+\ No newline at end of file
++obj-$(CONFIG_NANOPI_ADC_POWER)	+= nanopi_adc_power.o
++obj-$(CONFIG_CHARGER_SC8886S) += sc8886s_charger.o
+diff --git a/drivers/power/supply/sc8886s_charger.c b/drivers/power/supply/sc8886s_charger.c
+new file mode 100644
+index 000000000000..df679a7ade41
+--- /dev/null
++++ b/drivers/power/supply/sc8886s_charger.c
+@@ -0,0 +1,368 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * SC8886S Battery Charger Driver (Linux Kernel Port)
++ * Based on ESP-IDF driver by drinktoomuchsax
++ * Adapted for Z96A RK3568 with kernel 6.1.115
++ *
++ * Critical: This driver takes over the i2c-0/0x6b device.
++ * It assumes the bq25700_charger driver has been unbound/blacklisted.
++ */
++
++#include <linux/module.h>
++#include <linux/i2c.h>
++#include <linux/regmap.h>
++#include <linux/power_supply.h>
++#include <linux/of.h>
++#include <linux/interrupt.h>
++#include <linux/workqueue.h>
++#include <linux/delay.h>
++#include <linux/slab.h>
++
++/* ==================== SC8886S Register Addresses ==================== */
++#define SC8886S_REG_CHARGE_OPTION0_L  0x00
++#define SC8886S_REG_CHARGE_OPTION0_H  0x01
++#define SC8886S_REG_CHARGE_CURRENT_L  0x02
++#define SC8886S_REG_CHARGE_CURRENT_H  0x03
++#define SC8886S_REG_CHARGE_VOLTAGE_L  0x04
++#define SC8886S_REG_CHARGE_VOLTAGE_H  0x05
++#define SC8886S_REG_VSYSMIN           0x0D
++#define SC8886S_REG_IINDPM            0x0F
++#define SC8886S_REG_CHARGE_STATUS_0   0x20
++#define SC8886S_REG_CHARGE_STATUS_1   0x21
++#define SC8886S_REG_PROCHOT_STATUS_L  0x22
++#define SC8886S_REG_PROCHOT_STATUS_H  0x23
++#define SC8886S_REG_ADC_VBUS          0x27
++#define SC8886S_REG_ADC_ICHG          0x29
++#define SC8886S_REG_ADC_IIN           0x2B
++#define SC8886S_REG_ADC_VBAT          0x2C
++#define SC8886S_REG_ADC_VSYS          0x2D
++#define SC8886S_REG_CHARGE_OPT_1_L    0x30
++#define SC8886S_REG_PROCHOT_OPT_0_L   0x36
++#define SC8886S_REG_ADC_OPT_H         0x3B
++
++/* ==================== Power Supply Properties ==================== */
++struct sc8886s_chip {
++    struct i2c_client *client;
++    struct regmap *regmap;
++    struct power_supply *psy;
++    struct power_supply_desc psy_desc;
++    struct delayed_work monitor_work;
++    int irq;
++    int online;
++    int charging;
++    int vbat_mv;
++    int vbus_mv;
++    int ichg_ma;
++    int iin_ma;
++};
++
++/* ==================== Regmap ==================== */
++static const struct regmap_config sc8886s_regmap_cfg = {
++    .reg_bits = 8,
++    .val_bits = 8,
++    .max_register = 0xFF,
++    .cache_type = REGCACHE_NONE,
++};
++
++static int sc8886s_read_reg(struct sc8886s_chip *chip, u8 reg, u8 *val)
++{
++    return regmap_read(chip->regmap, reg, (unsigned int *)val);
++}
++
++static int sc8886s_write_reg(struct sc8886s_chip *chip, u8 reg, u8 val)
++{
++    return regmap_write(chip->regmap, reg, val);
++}
++
++/* ==================== bit_field operation ==================== */
++struct field_info {
++    u8 reg;
++    u8 lsb;
++    u8 len;
++};
++
++static u16 sc_mask(struct field_info f)
++{
++    return ((1 << f.len) - 1) << f.lsb;
++}
++
++static int sc8886s_field_write(struct sc8886s_chip *chip, struct field_info f, u16 val)
++{
++    int ret;
++    u8 v;
++    u16 mask = sc_mask(f);
++    u16 new_val;
++    int is_16bit = (f.lsb + f.len) > 8;
++
++    if (is_16bit) {
++        u16 v16;
++        ret = regmap_raw_read(chip->regmap, f.reg, &v16, 2);
++        if (ret) return ret;
++        v16 = le16_to_cpu(v16);
++        new_val = (v16 & ~mask) | ((val << f.lsb) & mask);
++        v16 = cpu_to_le16(new_val);
++        return regmap_raw_write(chip->regmap, f.reg, &v16, 2);
++    } else {
++        ret = sc8886s_read_reg(chip, f.reg, &v);
++        if (ret) return ret;
++        new_val = (v & ~mask) | ((val << f.lsb) & mask);
++        return sc8886s_write_reg(chip, f.reg, new_val);
++    }
++}
++
++static int sc8886s_field_read(struct sc8886s_chip *chip, struct field_info f, u16 *out)
++{
++    int ret;
++    u8 v;
++    u16 mask = sc_mask(f);
++    int is_16bit = (f.lsb + f.len) > 8;
++
++    if (is_16bit) {
++        u16 v16;
++        ret = regmap_raw_read(chip->regmap, f.reg, &v16, 2);
++        if (ret) return ret;
++        v16 = le16_to_cpu(v16);
++        *out = (v16 & mask) >> f.lsb;
++    } else {
++        ret = sc8886s_read_reg(chip, f.reg, &v);
++        if (ret) return ret;
++        *out = (v & mask) >> f.lsb;
++    }
++    /* 6.x remove returns void */
++}
++
++/* ==================== High-level config ==================== */
++static int sc8886s_set_charge_voltage(struct sc8886s_chip *chip, int mv)
++{
++    /* VCHG = raw * 8mV, max 19200mV */
++    struct field_info f = { SC8886S_REG_CHARGE_VOLTAGE_L, 3, 12 };
++    u16 raw = mv / 8;
++    return sc8886s_field_write(chip, f, raw);
++}
++
++static int sc8886s_set_charge_current(struct sc8886s_chip *chip, int ma)
++{
++    /* ICHG = raw * 64mA, max 8128mA */
++    struct field_info f = { SC8886S_REG_CHARGE_CURRENT_L, 6, 7 };
++    u16 raw = ma / 64;
++    return sc8886s_field_write(chip, f, raw);
++}
++
++static int sc8886s_set_vsysmin(struct sc8886s_chip *chip, int mv)
++{
++    /* VSYSMIN = 160 + raw*256 mV, max 16128mV */
++    struct field_info f = { SC8886S_REG_VSYSMIN, 0, 6 };
++    u16 raw = (mv - 160) / 256;
++    return sc8886s_field_write(chip, f, raw);
++}
++
++/* ==================== ADC Read ==================== */
++static int sc8886s_read_adc_vbat(struct sc8886s_chip *chip)
++{
++    struct field_info f = { SC8886S_REG_ADC_VBAT, 0, 8 };
++    u16 raw;
++    int ret = sc8886s_field_read(chip, f, &raw);
++    if (ret) return ret;
++    return 2880 + raw * 64; /* mV */
++}
++
++static int sc8886s_read_adc_vbus(struct sc8886s_chip *chip)
++{
++    struct field_info f = { SC8886S_REG_ADC_VBUS, 0, 8 };
++    u16 raw;
++    int ret = sc8886s_field_read(chip, f, &raw);
++    if (ret) return ret;
++    return 2880 + raw * 96; /* mV */
++}
++
++static int sc8886s_read_adc_ichg(struct sc8886s_chip *chip)
++{
++    struct field_info f = { SC8886S_REG_ADC_ICHG, 0, 7 };
++    u16 raw;
++    int ret = sc8886s_field_read(chip, f, &raw);
++    if (ret) return ret;
++    return raw * 64; /* mA */
++}
++
++/* ==================== Power Supply ==================== */
++static int sc8886s_psy_get_property(struct power_supply *psy,
++                                    enum power_supply_property psp,
++                                    union power_supply_propval *val)
++{
++    struct sc8886s_chip *chip = power_supply_get_drvdata(psy);
++
++    switch (psp) {
++    case POWER_SUPPLY_PROP_STATUS:
++        if (chip->charging)
++            val->intval = POWER_SUPPLY_STATUS_CHARGING;
++        else if (chip->online)
++            val->intval = POWER_SUPPLY_STATUS_NOT_CHARGING;
++        else
++            val->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++        break;
++    case POWER_SUPPLY_PROP_ONLINE:
++        val->intval = chip->online;
++        break;
++    case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++        val->intval = chip->vbat_mv * 1000; /* μV */
++        break;
++    case POWER_SUPPLY_PROP_CURRENT_NOW:
++        val->intval = chip->ichg_ma * 1000; /* μA */
++        break;
++    case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
++        val->intval = 8400 * 1000; /* 8.4V max */
++        break;
++    case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT:
++        val->intval = 1024 * 1000; /* 1A */
++        break;
++    default:
++        return -EINVAL;
++    }
++    /* 6.x remove returns void */
++}
++
++static enum power_supply_property sc8886s_psy_props[] = {
++    POWER_SUPPLY_PROP_STATUS,
++    POWER_SUPPLY_PROP_ONLINE,
++    POWER_SUPPLY_PROP_VOLTAGE_NOW,
++    POWER_SUPPLY_PROP_CURRENT_NOW,
++    POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
++    POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
++};
++
++static const struct power_supply_desc sc8886s_psy_desc = {
++    .name = "sc8886s",
++    .type = POWER_SUPPLY_TYPE_BATTERY,
++    .properties = sc8886s_psy_props,
++    .num_properties = ARRAY_SIZE(sc8886s_psy_props),
++    .get_property = sc8886s_psy_get_property,
++};
++
++/* ==================== Monitor Work ==================== */
++static void sc8886s_monitor_work(struct work_struct *work)
++{
++    struct sc8886s_chip *chip = container_of(work, struct sc8886s_chip,
++                                             monitor_work.work);
++
++    chip->vbat_mv = sc8886s_read_adc_vbat(chip);
++    chip->vbus_mv = sc8886s_read_adc_vbus(chip);
++    chip->ichg_ma = sc8886s_read_adc_ichg(chip);
++    chip->online = (chip->vbus_mv > 4000) ? 1 : 0;
++    chip->charging = (chip->ichg_ma > 50) ? 1 : 0;
++
++    schedule_delayed_work(&chip->monitor_work, HZ * 5);
++}
++
++/* ==================== Probe ==================== */
++static int sc8886s_probe(struct i2c_client *client, const struct i2c_device_id *id)
++{
++    struct sc8886s_chip *chip;
++    int ret;
++    u8 val;
++
++    chip = devm_kzalloc(&client->dev, sizeof(*chip), GFP_KERNEL);
++    if (!chip) return -ENOMEM;
++
++    chip->client = client;
++    i2c_set_clientdata(client, chip);
++
++    chip->regmap = devm_regmap_init_i2c(client, &sc8886s_regmap_cfg);
++    if (IS_ERR(chip->regmap)) {
++        dev_err(&client->dev, "regmap init failed\n");
++        return PTR_ERR(chip->regmap);
++    }
++
++    /* Read device ID to confirm */
++    ret = sc8886s_read_reg(chip, 0x2F, &val);
++    if (ret < 0) {
++        dev_err(&client->dev, "Failed to read DEVICE_ID: %d\n", ret);
++        return ret;
++    }
++    dev_info(&client->dev, "SC8886S device ID: 0x%02x (expected 0x66)\n", val);
++
++    /* Init: 10-step blind charge config */
++    /* Step 1: WDTWR_ADJ=3 (disable watchdog) */
++    /* 0x01 bit 5-6 = 11 = 0x60 */
++    {
++        struct field_info wdt = { SC8886S_REG_CHARGE_OPTION0_H, 5, 2 };
++        sc8886s_field_write(chip, wdt, 3);
++    }
++    /* Step 2: CHRG_INHIBIT=0 (allow charge) */
++    {
++        struct field_info inhib = { SC8886S_REG_CHARGE_OPTION0_L, 0, 1 };
++        sc8886s_field_write(chip, inhib, 0);
++    }
++    /* Step 3-5: enable ADC channels */
++    {
++        struct field_info en_vbus = { SC8886S_REG_ADC_OPT_H, 0, 1 };
++        struct field_info en_vbat = { SC8886S_REG_ADC_OPT_H, 2, 1 };
++        struct field_info en_ichg = { SC8886S_REG_ADC_OPT_H, 3, 1 };
++        sc8886s_field_write(chip, en_vbus, 1);
++        sc8886s_field_write(chip, en_vbat, 1);
++        sc8886s_field_write(chip, en_ichg, 1);
++    }
++    /* Step 6: VSYSMIN=6.0V */
++    sc8886s_set_vsysmin(chip, 6000);
++    /* Step 7: ICHG=1024mA */
++    sc8886s_set_charge_current(chip, 1024);
++    /* Step 8: VCHG=8.0V (instead of 8.4V default) */
++    sc8886s_set_charge_voltage(chip, 8000);
++    /* Step 9-10: PROCHOT disable BATOCP + BATOVP */
++    {
++        struct field_info batocp = { SC8886S_REG_PROCHOT_OPT_0_L, 3, 1 };
++        struct field_info batovp_22 = { SC8886S_REG_PROCHOT_STATUS_L, 3, 1 };
++        sc8886s_field_write(chip, batocp, 0);
++        sc8886s_field_write(chip, batovp_22, 0);
++    }
++
++    dev_info(&client->dev, "SC8886S configured: VSYSMIN=6.0V, ICHG=1A, VCHG=8.0V\n");
++
++    /* Register power supply */
++    chip->psy_desc = sc8886s_psy_desc;
++    chip->psy = devm_power_supply_register(&client->dev, &chip->psy_desc, NULL);
++    if (IS_ERR(chip->psy)) {
++        dev_err(&client->dev, "Failed to register power supply\n");
++        return PTR_ERR(chip->psy);
++    }
++
++    /* Start monitor work */
++    INIT_DELAYED_WORK(&chip->monitor_work, sc8886s_monitor_work);
++    schedule_delayed_work(&chip->monitor_work, HZ);
++
++    /* 6.x remove returns void */
++}
++
++static void sc8886s_remove(struct i2c_client *client)
++{
++    struct sc8886s_chip *chip = i2c_get_clientdata(client);
++    cancel_delayed_work_sync(&chip->monitor_work);
++    /* 6.x remove returns void */
++}
++
++static const struct of_device_id sc8886s_of_match[] = {
++    { .compatible = "southchip,sc8886" },
++    { .compatible = "ti,bq25700" },
++    { }
++};
++MODULE_DEVICE_TABLE(of, sc8886s_of_match);
++
++static const struct i2c_device_id sc8886s_id[] = {
++    { .name = "sc8886s_charger" },
++    { }
++};
++MODULE_DEVICE_TABLE(i2c, sc8886s_id);
++
++static struct i2c_driver sc8886s_driver = {
++    .driver = {
++        .name = "sc8886s_charger",
++        .of_match_table = sc8886s_of_match,
++    },
++    .id_table = sc8886s_id,
++    .probe = sc8886s_probe,
++    .remove = sc8886s_remove,
++};
++module_i2c_driver(sc8886s_driver);
++
++MODULE_AUTHOR("Z96A Battery Fix Project");
++MODULE_DESCRIPTION("SC8886S Battery Charger Driver (Linux Kernel Port)");
++MODULE_LICENSE("GPL");
