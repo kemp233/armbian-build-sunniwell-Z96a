@@ -30,7 +30,7 @@ index 4a8b488c7837..f4ed828d0c27 100644
 +obj-$(CONFIG_CHARGER_SC8886S) += sc8886s_charger.o
 diff --git a/drivers/power/supply/sc8886s_charger.c b/drivers/power/supply/sc8886s_charger.c
 new file mode 100644
-index 000000000000..df679a7ade41
+index 000000000000..c1c1cceef77d
 --- /dev/null
 +++ b/drivers/power/supply/sc8886s_charger.c
 @@ -0,0 +1,368 @@
@@ -164,7 +164,7 @@ index 000000000000..df679a7ade41
 +        if (ret) return ret;
 +        *out = (v & mask) >> f.lsb;
 +    }
-+    /* 6.x remove returns void */
++    return 0;
 +}
 +
 +/* ==================== High-level config ==================== */
@@ -254,7 +254,7 @@ index 000000000000..df679a7ade41
 +    default:
 +        return -EINVAL;
 +    }
-+    /* 6.x remove returns void */
++    return 0;
 +}
 +
 +static enum power_supply_property sc8886s_psy_props[] = {
@@ -365,14 +365,14 @@ index 000000000000..df679a7ade41
 +    INIT_DELAYED_WORK(&chip->monitor_work, sc8886s_monitor_work);
 +    schedule_delayed_work(&chip->monitor_work, HZ);
 +
-+    /* 6.x remove returns void */
++    return 0;
 +}
 +
 +static void sc8886s_remove(struct i2c_client *client)
 +{
 +    struct sc8886s_chip *chip = i2c_get_clientdata(client);
 +    cancel_delayed_work_sync(&chip->monitor_work);
-+    /* 6.x remove returns void */
++    return 0;
 +}
 +
 +static const struct of_device_id sc8886s_of_match[] = {
