@@ -30,10 +30,10 @@ index 4a8b488c7837..f4ed828d0c27 100644
 +obj-$(CONFIG_CHARGER_SC8886S) += sc8886s_charger.o
 diff --git a/drivers/power/supply/sc8886s_charger.c b/drivers/power/supply/sc8886s_charger.c
 new file mode 100644
-index 000000000000..c1c1cceef77d
+index 000000000000..6835a8d4dbf2
 --- /dev/null
 +++ b/drivers/power/supply/sc8886s_charger.c
-@@ -0,0 +1,368 @@
+@@ -0,0 +1,361 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * SC8886S Battery Charger Driver (Linux Kernel Port)
@@ -290,7 +290,7 @@ index 000000000000..c1c1cceef77d
 +}
 +
 +/* ==================== Probe ==================== */
-+static int sc8886s_probe(struct i2c_client *client, const struct i2c_device_id *id)
++static int sc8886s_probe(struct i2c_client *client)
 +{
 +    struct sc8886s_chip *chip;
 +    int ret;
@@ -372,7 +372,7 @@ index 000000000000..c1c1cceef77d
 +{
 +    struct sc8886s_chip *chip = i2c_get_clientdata(client);
 +    cancel_delayed_work_sync(&chip->monitor_work);
-+    return 0;
++    /* 6.x remove returns void */
 +}
 +
 +static const struct of_device_id sc8886s_of_match[] = {
@@ -382,18 +382,11 @@ index 000000000000..c1c1cceef77d
 +};
 +MODULE_DEVICE_TABLE(of, sc8886s_of_match);
 +
-+static const struct i2c_device_id sc8886s_id[] = {
-+    { .name = "sc8886s_charger" },
-+    { }
-+};
-+MODULE_DEVICE_TABLE(i2c, sc8886s_id);
-+
 +static struct i2c_driver sc8886s_driver = {
 +    .driver = {
 +        .name = "sc8886s_charger",
 +        .of_match_table = sc8886s_of_match,
 +    },
-+    .id_table = sc8886s_id,
 +    .probe = sc8886s_probe,
 +    .remove = sc8886s_remove,
 +};
