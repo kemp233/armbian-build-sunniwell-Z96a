@@ -79,7 +79,8 @@ jobs:
                      CONFIG_BATTERY_RK817=y CONFIG_ARCH_ROCKCHIP=y \
                      CONFIG_ARM_ROCKCHIP_CPUFREQ=y \
                      CONFIG_DEVFREQ_GOV_SIMPLE_ONDEMAND=y \
-                     CONFIG_PM_DEVFREQ=y CONFIG_ROCKCHIP_PM_DOMAINS=y; do
+                     CONFIG_PM_DEVFREQ=y CONFIG_ROCKCHIP_PM_DOMAINS=y \
+                     CONFIG_CHARGER_SC8886S=m; do
             grep -q "^${opt}=" .config || echo "${opt}" >> .config
           done
           make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
