@@ -1,0 +1,42 @@
+name: Build Z96A v2 rootfs (with sc8886s_charger.ko)
+
+on:
+  workflow_dispatch:
+    inputs:
+      armbian_kernel_branch:
+        type: choice
+        description: 'Kernel branch'
+        options: [legacy, current, edge]
+        default: 'legacy'
+      armbian_release:
+        type: choice
+        description: 'Userspace'
+        options: [jammy, bookworm, trixie]
+        default: 'bookworm'
+      armbian_ui:
+        type: choice
+        description: 'UI'
+        options: [minimal, server, xfce, gnome]
+        default: 'minimal'
+
+jobs:
+  build-z96a:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: armbian/build@v26.2.1
+        with:
+          armbian_token: "${{secrets.GITHUB_TOKEN}}"
+          armbian_target: build
+          armbian_release: "${{inputs.armbian_release || 'bookworm'}}"
+          armbian_kernel_branch: "${{inputs.armbian_kernel_branch || 'legacy'}}"
+          armbian_ui: "${{inputs.armbian_ui || 'minimal'}}"
+          armbian_board: z96a-v2
+          armbian_release_title: "Armbian Z96A v2 (with sc8886s_charger)"
+          armbian_release_body: "Z96A v2 rootfs with custom SC8886S charger driver"
+          armbian_pgp_key: "${{secrets.GPG_KEY1}}"
+          armbian_pgp_password: "${{secrets.GPG_PASSPHRASE1}}"
