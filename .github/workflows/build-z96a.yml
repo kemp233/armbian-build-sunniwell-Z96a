@@ -2,19 +2,6 @@ name: Build Z96A v2 rootfs (direct)
 
 on:
   workflow_dispatch:
-    inputs:
-      armbian_kernel_branch:
-        type: choice
-        options: [legacy]
-        default: 'legacy'
-      armbian_release:
-        type: choice
-        options: [bookworm]
-        default: 'bookworm'
-      armbian_ui:
-        type: choice
-        options: [minimal]
-        default: 'minimal'
 
 jobs:
   build-z96a:
@@ -23,7 +10,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout THIS repo (has my patches + board)
+      - name: Checkout THIS repo
         uses: actions/checkout@v4
         with:
           repository: kemp233/armbian-build-action
@@ -35,10 +22,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git uuid-dev qemu-user-static debootstrap \
-            python3 python3-distutils python3-dev \
+            python3 python3-distutils python3-dev python3-pyelftools \
             gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu \
             libc6-dev-arm64-cross libc6-dev-armhf-cross \
-            bc bison flex libssl-dev ccache
+            bc bison flex libssl-dev ccache debian-archive-keyring
 
       - name: Verify z96a patches present
         run: |
@@ -46,11 +33,9 @@ jobs:
           echo "=== Patches ==="
           ls -la patch/kernel/rockchip-rk3568-z96a/legacy/
           echo "=== Board ==="
-          ls -la config/boards/z96a-v2.conf
-          echo "=== Family ==="
-          ls -la config/sources/families/rockchip-rk3568-z96a.conf
+          cat config/boards/z96a-v2.conf | head -5
 
-      - name: Build rootfs
+      - name: Build rootfs (non-interactive)
         run: |
           cd armbian
           ./compile.sh build \
@@ -60,14 +45,15 @@ jobs:
             BUILD_MINIMAL=yes \
             BUILD_DESKTOP=no \
             COMPRESS_OUTPUTIMAGE=sha,img,xz \
-            SHARE_LOG=yes
+            KERNEL_CONFIGURE=no \
+            EXPERT=yes \
+            SHARE_LOG=yes < /dev/null
 
       - name: Find build output
         id: out
         run: |
           cd armbian
           ls -la output/images/ 2>&1 | head -20
-          echo "artifacts=$(ls output/images/*.img.xz 2>/dev/null | head -1 | xargs -I{} basename {})" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
