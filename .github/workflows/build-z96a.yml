@@ -1,42 +1,77 @@
-name: Build Z96A v2 rootfs (with sc8886s_charger.ko)
+name: Build Z96A v2 rootfs (direct)
 
 on:
   workflow_dispatch:
     inputs:
       armbian_kernel_branch:
         type: choice
-        description: 'Kernel branch'
-        options: [legacy, current, edge]
+        options: [legacy]
         default: 'legacy'
       armbian_release:
         type: choice
-        description: 'Userspace'
-        options: [jammy, bookworm, trixie]
+        options: [bookworm]
         default: 'bookworm'
       armbian_ui:
         type: choice
-        description: 'UI'
-        options: [minimal, server, xfce, gnome]
+        options: [minimal]
         default: 'minimal'
 
 jobs:
   build-z96a:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout THIS repo (has my patches + board)
+        uses: actions/checkout@v4
         with:
+          repository: kemp233/armbian-build-action
+          path: armbian
           fetch-depth: 0
 
-      - uses: armbian/build@v26.2.1
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git uuid-dev qemu-user-static debootstrap \
+            python3 python3-distutils python3-dev \
+            gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu \
+            libc6-dev-arm64-cross libc6-dev-armhf-cross \
+            bc bison flex libssl-dev ccache
+
+      - name: Verify z96a patches present
+        run: |
+          cd armbian
+          echo "=== Patches ==="
+          ls -la patch/kernel/rockchip-rk3568-z96a/legacy/
+          echo "=== Board ==="
+          ls -la config/boards/z96a-v2.conf
+          echo "=== Family ==="
+          ls -la config/sources/families/rockchip-rk3568-z96a.conf
+
+      - name: Build rootfs
+        run: |
+          cd armbian
+          ./compile.sh build \
+            BOARD=z96a-v2 \
+            BRANCH=legacy \
+            RELEASE=bookworm \
+            BUILD_MINIMAL=yes \
+            BUILD_DESKTOP=no \
+            COMPRESS_OUTPUTIMAGE=sha,img,xz \
+            SHARE_LOG=yes
+
+      - name: Find build output
+        id: out
+        run: |
+          cd armbian
+          ls -la output/images/ 2>&1 | head -20
+          echo "artifacts=$(ls output/images/*.img.xz 2>/dev/null | head -1 | xargs -I{} basename {})" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          armbian_token: "${{secrets.GITHUB_TOKEN}}"
-          armbian_target: build
-          armbian_release: "${{inputs.armbian_release || 'bookworm'}}"
-          armbian_kernel_branch: "${{inputs.armbian_kernel_branch || 'legacy'}}"
-          armbian_ui: "${{inputs.armbian_ui || 'minimal'}}"
-          armbian_board: z96a-v2
-          armbian_release_title: "Armbian Z96A v2 (with sc8886s_charger)"
-          armbian_release_body: "Z96A v2 rootfs with custom SC8886S charger driver"
-          armbian_pgp_key: "${{secrets.GPG_KEY1}}"
-          armbian_pgp_password: "${{secrets.GPG_PASSPHRASE1}}"
+          name: z96a-v2-rootfs
+          path: armbian/output/images/*.img.xz
+          if-no-files-found: error
