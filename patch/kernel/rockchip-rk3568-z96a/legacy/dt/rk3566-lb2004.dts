@@ -279,6 +279,23 @@
 	status = "okay";
 };
 
+/* 3.3V rail alias - the io-domain driver cannot read the voltage of
+ * RK809 SWITCH_REG1 (vcc_3v3), which made the whole io-domains probe
+ * fail (-22) and left ALL VCCIO voltages unset (USB/WiFi/GMAC IO dead).
+ * This fixed regulator models the same always-on 3.3V rail with a
+ * readable voltage. */
+/ {
+	vcc3v3_io: vcc3v3-io {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc3v3_io";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+};
+
 /* IO domains - per original Android DT (io-domains under pmugrf@fdc20000,
  * phandle 0x14e). The main-GRF io-domains node stays disabled as in the
  * factory DT; vccio2 is deliberately left unconfigured there too. */
@@ -289,9 +306,9 @@
 	vccio1-supply = <&vccio_acodec>;
 	vccio3-supply = <&vccio_sd>;
 	vccio4-supply = <&vcc_1v8>;
-	vccio5-supply = <&vcc_3v3>;
+	vccio5-supply = <&vcc3v3_io>;
 	vccio6-supply = <&vcc_1v8>;
-	vccio7-supply = <&vcc_3v3>;
+	vccio7-supply = <&vcc3v3_io>;
 };
 
 /* HDMI - core node exists in both forks */
