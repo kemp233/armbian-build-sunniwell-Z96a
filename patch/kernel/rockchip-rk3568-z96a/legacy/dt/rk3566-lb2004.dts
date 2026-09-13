@@ -386,6 +386,19 @@
 			mic-in-differential;
 		};
 
+		/* lb2004 has no battery/charger; stub nodes keep the rk808 MFD
+		 * from warning "rk817-battery: Failed to locate of_node".
+		 * mfd-core skips children whose status is "disabled" silently. */
+		battery {
+			compatible = "rk817,battery";
+			status = "disabled";
+		};
+
+		charger {
+			compatible = "rk817,charger";
+			status = "disabled";
+		};
+
 		regulators {
 			vdd_logic: DCDC_REG1 {
 				regulator-always-on;
@@ -407,6 +420,11 @@
 				regulator-init-microvolt = <900000>;
 				regulator-initial-mode = <2>;
 				regulator-name = "vdd_gpu";
+				/* factory Android set regulator-init-microvolt=<900000>
+				 * + initial-mode=<2>; the init-microvolt property is
+				 * NOT parsed by this tree's rk808 driver (only pwm-
+				 * regulator.c), so only the mode is ported. */
+				regulator-initial-mode = <2>;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -430,6 +448,9 @@
 				regulator-init-microvolt = <900000>;
 				regulator-initial-mode = <2>;
 				regulator-name = "vdd_npu";
+				/* same as vdd_gpu: init-microvolt not parsed by the
+				 * rk808 driver; mode 2 = AUTO_PWM (factory value). */
+				regulator-initial-mode = <2>;
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
@@ -997,4 +1018,154 @@
 			rockchip,pins = <0 RK_PB4 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
+};
+
+/*
+ * lb2004 io-domains: only "rockchip,rk3568-pmu-io-voltage-domain" (pmugrf)
+ * has a driver match entry; the main-GRF io-domains node stays disabled
+ * (factory puts ALL domains in the pmugrf node too). Supply mapping is
+ * taken from the factory Android DTB phandles:
+ *   pmuio1/2 = vcc3v3_pmu, vccio1 = vccio_acodec, vccio3 = vccio_sd,
+ *   vccio4/6 = vcc_1v8, vccio5/7 = vcc_3v3, vccio2 = unset (factory same)
+ */
+&pmu_io_domains {
+	status = "okay";
+	pmuio1-supply = <&vcc3v3_pmu>;
+	pmuio2-supply = <&vcc3v3_pmu>;
+	vccio1-supply = <&vccio_acodec>;
+	vccio3-supply = <&vccio_sd>;
+	vccio4-supply = <&vcc_1v8>;
+	vccio5-supply = <&vcc_3v3>;
+	vccio6-supply = <&vcc_1v8>;
+	vccio7-supply = <&vcc_3v3>;
+};
+
+/*
+ * lb2004 OPP overrides: flatten CPU/GPU/NPU voltage tables to the values
+ * measured in the factory Android DTB (one step lower than the BSP tables
+ * in rk356x.dtsi, which target RK3568 boards). L0-L3 tiering and
+ * opp-supported-hw gating are deleted to match the factory flat tables.
+ */
+&cpu0_opp_table {
+	opp-408000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1150000>;
+	};
+	opp-600000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1150000>;
+	};
+	opp-816000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1150000>;
+	};
+	opp-1104000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1150000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-1416000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <925000 925000 1150000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-1608000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <1000000 1000000 1150000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-1800000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <1050000 1050000 1150000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+};
+
+&gpu_opp_table {
+	opp-200000000 {
+		opp-microvolt = <825000>;
+	};
+	opp-300000000 {
+		opp-microvolt = <825000>;
+	};
+	opp-400000000 {
+		opp-microvolt = <825000>;
+	};
+	opp-600000000 {
+		opp-microvolt = <825000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-700000000 {
+		opp-microvolt = <900000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-800000000 {
+		opp-microvolt = <950000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+};
+
+&npu_opp_table {
+	opp-200000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1000000>;
+	};
+	opp-300000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1000000>;
+	};
+	opp-400000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1000000>;
+	};
+	opp-600000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <825000 825000 1000000>;
+	};
+	opp-700000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <850000 850000 1000000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-800000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <875000 875000 1000000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	opp-900000000 {
+		/delete-property/ opp-supported-hw;
+		opp-microvolt = <925000 925000 1000000>;
+		/delete-property/ opp-microvolt-L0;
+		/delete-property/ opp-microvolt-L1;
+		/delete-property/ opp-microvolt-L2;
+		/delete-property/ opp-microvolt-L3;
+	};
+	/* opp-1000000000: stays disabled (factory same) */
 };
