@@ -667,23 +667,33 @@
 	status = "okay";
 };
 
-/* WiFi module power enables - factory DT drives both high; without
- * them the RTL8822CS never gets 3.3V and never appears on SDIO */
-&gpio2 {
-	wifi-en-hog {
-		gpio-hog;
-		gpios = <RK_PC6 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "wifi-en";
+/* WiFi module 3.3V power enables - factory provides them as two
+ * always-on fixed regulators (NOT gpio-hogs): the regulator core
+ * enables both at probe, rfkill-wlan leaves power GPIOs unset
+ * (factory wireless_wlan has no WIFI,poweren_gpio property). */
+/ {
+	vcc3v3_wifi_en: vcc-3v3-en-regulator {
+		compatible = "regulator-fixed";
+		gpio = <&gpio2 RK_PC6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_en>;
+		regulator-name = "vcc_3v3_wifi";
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc_3v3>;
 	};
-};
 
-&gpio3 {
-	wifi-pwren-hog {
-		gpio-hog;
-		gpios = <RK_PB0 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "wifi-pwren";
+	vcc3v3_wifi_pwren: vcc-3v3-wifi-regulator {
+		compatible = "regulator-fixed";
+		gpio = <&gpio3 RK_PB0 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&wifi_pwren>;
+		regulator-name = "vcc_3v3_wifi";
+		enable-active-high;
+		regulator-always-on;
+		regulator-boot-on;
+		vin-supply = <&vcc_3v3>;
 	};
 };
 
@@ -992,6 +1002,14 @@
 		};
 		wifi_host_wake_irq: wifi-host-wake-irq {
 			rockchip,pins = <2 RK_PB2 RK_FUNC_GPIO &pcfg_pull_down>;
+		};
+		/* WiFi 3.3V enable pads per factory: wifi-en = GPIO2_C6
+		 * (pull-up), wifi-pwren = GPIO3_B0 (pull-down) */
+		wifi_en: wifi-en {
+			rockchip,pins = <2 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+		wifi_pwren: wifi-pwren {
+			rockchip,pins = <3 RK_PB0 RK_FUNC_GPIO &pcfg_pull_down>;
 		};
 	};
 
