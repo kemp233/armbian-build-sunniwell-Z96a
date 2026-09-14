@@ -922,10 +922,10 @@
 			compatible = "snps,dwc3";
 			reg = <0x00 0xfcc00000 0x00 0x400000>;
 			interrupts = <0x00 0xa9 0x04>;
-			/* otg + extcon(usb2phy0): C 口自动切换角色
-			 * (插设备=host, 插充电器/电脑=device), 出厂行为 */
-			extcon = <0x28>;
-			dr_mode = "otg";
+			/* 固定 host（真机验证 v3）: otg+extcon 下开机插设备
+			 * 卡角色切换枚举、OTG 口插 USB 网卡不工作；
+			 * 充电由 SC8886 用户态单写者脚本负责，与数据角色无关 */
+			dr_mode = "host";
 			phys = <0x28 0x24 0x04>;
 			phy-names = "usb2-phy\0usb3-phy";
 			phy_type = "utmi_wide";
@@ -1335,8 +1335,10 @@
 		sc8886@6b {
 			compatible = "ti,bq25700\0southchip,sc8886";
 			reg = <0x6b>;
-			interrupt-parent = <0x41>;
-			interrupts = <0x12 0x08>;
+			/* disabled（真机验证 v2）: bq25700 驱动 probe 时重写寄存器
+			 * 与 C 口供电取电路径冲突 → 开机卡内核(背光一闪死机)。
+			 * 充电由用户态单写者脚本直接 i2c 访问 0-006b，不受 DT 状态影响 */
+			status = "disabled";
 			ti,charge-current = <0xf4240>;
 			ti,max-input-voltage = <0xe4e1c0>;
 			ti,max-input-current = <0x5b8d80>;
@@ -1356,7 +1358,6 @@
 			temp_res_up = <0x2710>;
 			low_temp_off = <0x00>;
 			high_temp_off = <0x2b>;
-			status = "okay";
 			phandle = <0x176>;
 		};
 
