@@ -227,17 +227,19 @@
  * rx_delay 0x2d. Previous port used the m0 mux and PA3 reset pin, which is
  * why the wired NIC never came up. */
 &gmac1 {
-	phy-mode = "rgmii";
-	/* clock direction = output: the SoC generates the 125M RGMII clock
-	 * internally (rgmii_speed mux) and drives it out to the PHY.
-	 * The factory used "input" with an external 125M oscillator - on
-	 * this board the oscillator does not run under our kernel, which
-	 * left the MAC core unclocked and the DMA soft-reset timing out. */
-	clock_in_out = "output";
+	/* phy-mode rgmii-rxid + clock_in_out input: extracted from a
+	 * working Debian LB2004 (PHY MAE0621A-Q2C, id 0x7b744411).
+	 * Plain "rgmii" left the PHY id1 unreadable (0xffff4411). */
+	phy-mode = "rgmii-rxid";
+	clock_in_out = "input";
 
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
+	/* parents decoded from the working board DTB: <&cru 391> <&cru 197>
+	 * = SCLK_GMAC1_RGMII_SPEED, CLK_MAC1_2TOP (internal PLL path,
+	 * pairs with clock_in_out="input"). CLK_MAC1_OUT is the output
+	 * direction and made reparent fail with -22. */
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
-				 <&cru SCLK_GMAC1_RGMII_SPEED>;
+				 <&cru CLK_MAC1_2TOP>;
 	assigned-clock-rates = <125000000>, <125000000>;
 
 	pinctrl-names = "default";
