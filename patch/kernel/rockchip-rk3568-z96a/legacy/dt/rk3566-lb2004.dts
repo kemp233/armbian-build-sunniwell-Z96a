@@ -246,8 +246,10 @@
 	pinctrl-0 = <&gmac1m1_miim &gmac1m1_tx_bus2 &gmac1m1_rx_bus2
 		     &gmac1m1_rgmii_clk &gmac1m1_rgmii_bus &gmac1m1_clkinout>;
 
-	snps,reset-gpio = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
-	snps,reset-active-low;
+	/* PHY reset moved to the mdio1 node (see comment there) - the legacy
+	 * snps,reset-gpio here pulses the line once then devm_gpiod_put()
+	 * releases it, and the PHY falls back to reset before its ID is
+	 * read (PHYSID1 = 0xffff). */
 	snps,reset-delays-us = <0 20000 100000>;
 
 	tx_delay = <0x4f>;
@@ -258,6 +260,14 @@
 };
 
 &mdio1 {
+	/* reset-gpios here (not on gmac): mdio subsystem does the full
+	 * assert/deassert around PHY probe and holds the line, so the PHY
+	 * (MAE0621A-Q2C) is stable before its ID is read. Delays match the
+	 * working Debian LB2004 (snps,reset-delays-us <0 20000 100000>). */
+	reset-gpios = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
+	reset-delay-us = <20>;
+	reset-post-delay-us = <100000>;
+
 	rgmii_phy1: ethernet-phy@0 {
 		compatible = "ethernet-phy-ieee802.3-c22";
 		reg = <0>;
