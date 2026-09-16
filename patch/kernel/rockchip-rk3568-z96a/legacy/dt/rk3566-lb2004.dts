@@ -109,7 +109,25 @@
 
 	vcc5v0_host: vcc5v0-host {
 		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio0 RK_PA6 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc5v0_host_en>;
 		regulator-name = "vcc5v0_host";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&vcc5v0_sys>;
+	};
+
+	vcc5v0_usb: vcc5v0-usb {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio3 RK_PB3 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc5v0_usb_en>;
+		regulator-name = "vcc5v0_usb";
 		regulator-always-on;
 		regulator-boot-on;
 		regulator-min-microvolt = <5000000>;
@@ -119,6 +137,10 @@
 
 	vcc5v0_otg: vcc5v0-otg {
 		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio0 RK_PC4 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vcc5v0_otg_en>;
 		regulator-name = "vcc5v0_otg";
 		regulator-always-on;
 		regulator-boot-on;
@@ -592,21 +614,16 @@
 	status = "okay";
 };
 
-/* USB - factory Android enables ALL controllers. The BSP dtsi wires
- * usb_host0_ehci/ohci to u2phy1_otg (wrong, and its "utmi" clock comes
- * from usb2phy1) - override to u2phy0_host + usb2phy0 clock so the first
- * USB2 port actually enumerates. Supplies per factory DT. */
+/* USB - 按工厂 Android DTB 接线:
+ * usb_host0_ehci/ohci -> u2phy1_otg (phys=0x27), usb_host1 -> u2phy1_host (0x28).
+ * 注意: 主控外设寄存器物理走线决定, 必须与工厂一致否则数据线不通. */
 &usb_host0_ehci {
-	phys = <&u2phy0_host>;
-	clocks = <&cru HCLK_USB2HOST0>, <&cru HCLK_USB2HOST0_ARB>,
-		 <&cru PCLK_USB>, <&usb2phy0>;
+	phys = <&u2phy1_otg>;
 	status = "okay";
 };
 
 &usb_host0_ohci {
-	phys = <&u2phy0_host>;
-	clocks = <&cru HCLK_USB2HOST0>, <&cru HCLK_USB2HOST0_ARB>,
-		 <&cru PCLK_USB>, <&usb2phy0>;
+	phys = <&u2phy1_otg>;
 	status = "okay";
 };
 
@@ -626,6 +643,19 @@
 
 &u2phy0_host {
 	phy-supply = <&vcc5v0_host>;
+	status = "okay";
+};
+
+/* USB3 口: 工厂走 usbhost_dwc3(fd000000) + combphy1, 需同时启用父节点 */
+&combphy1_usq {
+	status = "okay";
+};
+
+&usbhost30 {
+	status = "okay";
+};
+
+&usbhost_dwc3 {
 	status = "okay";
 };
 
@@ -656,6 +686,7 @@
 &usbdrd_dwc3 {
 	phys = <&u2phy0_otg>;
 	phy-names = "usb2-phy";
+	dr_mode = "host";
 	maximum-speed = "high-speed";
 	status = "okay";
 };
@@ -988,8 +1019,33 @@
 	};
 };
 
+/* GPIO hog: hub 芯片复位释放, 启动即驱动为高 */
+&gpio3 {
+	hub-rst-hog {
+		gpio-hog;
+		gpios = <RK_PB4 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "hub-rst-3v3";
+	};
+};
+
 /* Pinctrl */
 &pinctrl {
+	usb {
+		vcc5v0_usb_en: vcc5v0-usb-en {
+			rockchip,pins = <3 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+		vcc5v0_host_en: vcc5v0-host-en {
+			rockchip,pins = <0 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+		vcc5v0_otg_en: vcc5v0-otg-en {
+			rockchip,pins = <0 RK_PC4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+		hub_rst_3v3: hub-rst-3v3 {
+			rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
 	pmic {
 		pmic_int_l: pmic-int-l {
 			rockchip,pins = <0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
