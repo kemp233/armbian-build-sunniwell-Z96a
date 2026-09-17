@@ -677,7 +677,44 @@
 	};
 };
 
-/* I2S0/1 - both labels exist in 6.1 BSP */
+/* NPU - rknpu_drv.c fetches its irq by name
+ * ({ "npu_irq", rknpu_core0_irq_handler }) via platform_get_irq_byname,
+ * so the node needs interrupt-names or probe hits -ENXIO. */
+&rknpu {
+	interrupt-names = "npu_irq";
+};
+
+/* NPU opp table - BSP driver bug workaround: the 6.1 branch of
+ * rknpu_devfreq.c sets opp_info->supported_hw[] but never calls
+ * dev_pm_opp_set_supported_hw(), so the opp framework's
+ * opp_table->supported_hw stays NULL.  Since every opp node carries an
+ * opp-supported-hw property, _opp_is_supported() marks them ALL
+ * unsupported ("no supported OPPs" -> "failed to add opp table" ->
+ * no /dev/rknpu).  Drop the properties so the opp framework treats
+ * every OPP as supported. */
+&npu_opp_table {
+	/delete-property/ rockchip,supported-hw;
+
+	opp-200000000 { /delete-property/ opp-supported-hw; };
+	opp-300000000 { /delete-property/ opp-supported-hw; };
+	opp-400000000 { /delete-property/ opp-supported-hw; };
+	opp-600000000 { /delete-property/ opp-supported-hw; };
+	opp-700000000 { /delete-property/ opp-supported-hw; };
+	opp-800000000 { /delete-property/ opp-supported-hw; };
+	opp-900000000 { /delete-property/ opp-supported-hw; };
+	opp-1000000000 { /delete-property/ opp-supported-hw; };
+};
+
+/* OTP - the dtsi ships short clock-names ("usr","sbpi","apb","phy") but
+ * the rockchip-otp driver (rk3568_data) looks them up by full names via
+ * devm_clk_bulk_get, so clk lookup fails with -ENOENT, OTP never probes,
+ * nvmem cells are missing, and bus-npu cannot read leakage -> NPU opp
+ * table init fails ("failed to add opp table").  Restore the names the
+ * driver expects. */
+&otp {
+	clock-names = "clk_otpc_ns_usr", "clk_otpc_ns_sbpi",
+		      "pclk_otpc_ns", "pclk_otpphy";
+};
 &pinctrl {
 	/* rk3568-pinctrl.dtsi has no i2s0 groups (i2s0 is normally an
 	 * internal route to hdmi).  On LB2004 the PAM8406 amp listens on
