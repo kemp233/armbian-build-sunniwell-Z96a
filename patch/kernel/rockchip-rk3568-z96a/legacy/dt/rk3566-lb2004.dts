@@ -159,6 +159,11 @@
 	};
 
 	/* Audio */
+	/* HDMI sound (rk356x.dtsi defines the card: i2s0 -> hdmi internal
+	 * route) drives the PAM8406 I2S class-D amp - on this board the
+	 * amp's I2S lines are tied to the HDMI audio path, same as the
+	 * factory Android DTB. Enabled via &hdmi_sound below, no pinctrl
+	 * needed: i2s0 -> hdmi is an internal SoC route. */
 	rk809_sound: rk809-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
@@ -169,7 +174,7 @@
 			sound-dai = <&i2s1_8ch>;
 		};
 		simple-audio-card,codec {
-			sound-dai = <&rk809>;
+			sound-dai = <&rk809_codec>;
 		};
 	};
 
@@ -227,17 +232,24 @@
  * rx_delay 0x2d. Previous port used the m0 mux and PA3 reset pin, which is
  * why the wired NIC never came up. */
 &gmac1 {
-	/* phy-mode rgmii-rxid + clock_in_out input: extracted from a
-	 * working Debian LB2004 (PHY MAE0621A-Q2C, id 0x7b744411).
-	 * Plain "rgmii" left the PHY id1 unreadable (0xffff4411). */
+	/* phy-mode rgmii-rxid: extracted from a working Debian LB2004 - its
+	 * PHY (MAE0621A-Q2C, id 0x7b744411) comes up with this mode; plain
+	 * "rgmii" left the id read as 0xffff4411 (PHY id1 unreadable). */
 	phy-mode = "rgmii-rxid";
+	/* clock direction: factory Android uses "input" (external 125M
+	 * oscillator feeds the RGMII ref clock). Revert to factory setting -
+	 * the earlier "output" experiment still failed to read the PHY id,
+	 * so the oscillator hypothesis was not the blocker. */
 	clock_in_out = "input";
 
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
-	/* parents decoded from the working board DTB: <&cru 391> <&cru 197>
-	 * = SCLK_GMAC1_RGMII_SPEED, CLK_MAC1_2TOP (internal PLL path,
-	 * pairs with clock_in_out="input"). CLK_MAC1_OUT is the output
-	 * direction and made reparent fail with -22. */
+	/* Clock parents decoded from the working Debian LB2004 DTB:
+	 * assigned-clock-parents = <&cru 391> <&cru 197> =
+	 * SCLK_GMAC1_RGMII_SPEED, CLK_MAC1_2TOP.  CLK_MAC1_2TOP is the
+	 * internal PLL path and pairs with clock_in_out="input" (the
+	 * external 125M oscillator feeds gmac1_clkin separately); using
+	 * CLK_MAC1_OUT here was the output direction and reparent failed
+	 * with -22. */
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
 				 <&cru CLK_MAC1_2TOP>;
 	assigned-clock-rates = <125000000>, <125000000>;
@@ -246,10 +258,13 @@
 	pinctrl-0 = <&gmac1m1_miim &gmac1m1_tx_bus2 &gmac1m1_rx_bus2
 		     &gmac1m1_rgmii_clk &gmac1m1_rgmii_bus &gmac1m1_clkinout>;
 
-	/* PHY reset moved to the mdio1 node (see comment there) - the legacy
-	 * snps,reset-gpio here pulses the line once then devm_gpiod_put()
-	 * releases it, and the PHY falls back to reset before its ID is
-	 * read (PHYSID1 = 0xffff). */
+	/* PHY reset on GPIO4 PC2. Moved from the gmac node's legacy
+	 * snps,reset-gpio (which only pulses the line once during mdio
+	 * register and then devm_gpiod_put() releases it - on this board
+	 * the PHY then falls back to reset and PHY ID1 reads 0xffff) to
+	 * the mdio node's standard reset-gpios: the mdio subsystem holds
+	 * the GPIO, asserts/deasserts around every PHY probe, so the PHY
+	 * is guaranteed out of reset before its ID is read. */
 	snps,reset-delays-us = <0 20000 100000>;
 
 	tx_delay = <0x4f>;
@@ -353,18 +368,38 @@
 	status = "okay";
 };
 
-#if 0 /* rk-6.1-rkr6.1 dtsi lacks &hdmi_in / &hdmi_out (VOP2 endpoints inlined in &hdmi) */
-&hdmi_in {
-	hdmi_in_vp0: endpoint {
-		remote-endpoint = <&vp0_out_hdmi>;
+/* PAM8406 class-D amp enable - GPIO1_A4, ACTIVE_HIGH.  The rk817 codec
+ * driver claims the line via spk-ctl-gpios but never raises it, so hog
+ * it high here to keep the amp permanently enabled.  This pin must not
+ * be muxed as i2s1 sclkrx (see &i2s1_8ch pinctrl override). */
+&gpio1 {
+	amp_en {
+		gpio-hog;
+		gpios = <RK_PA4 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "pam8406-amp-en";
 	};
+};
+
+/* HDMI / VOP display pipeline - PAM8406 amp audio rides the HDMI
+ * audio path (i2s0 -> hdmi). rk356x.dtsi defines all the nodes and
+ * endpoints; they default to disabled, enable them here. */
+&hdmi {
+	status = "okay";
 };
 
 &hdmi_sound {
 	status = "okay";
 };
 
-/* VOP (Video Output Processor) */
+&hdmi_in_vp0 {
+	status = "okay";
+};
+
+&hdmi_in_vp1 {
+	status = "okay";
+};
+
 &vop {
 	assigned-clocks = <&cru DCLK_VOP0>, <&cru DCLK_VOP1>;
 	assigned-clock-parents = <&pmucru PLL_HPLL>, <&cru PLL_VPLL>;
@@ -376,12 +411,16 @@
 };
 
 &vp0 {
-	vp0_out_hdmi: endpoint@ROCKCHIP_VOP2_EP_HDMI0 {
-		reg = <ROCKCHIP_VOP2_EP_HDMI0>;
-		remote-endpoint = <&hdmi_in_vp0>;
+	vp0_out_hdmi: endpoint@3 {
+		status = "okay";
 	};
 };
-#endif
+
+&vp1 {
+	vp1_out_hdmi: endpoint@3 {
+		status = "okay";
+	};
+};
 
 /* I2C0: PMIC (SYR827 + RK809) */
 &i2c0 {
@@ -417,8 +456,29 @@
 		#clock-cells = <1>;
 		clock-output-names = "rk808-clkout1", "rk808-clkout2";
 
-		codec {
+		rk809_codec: codec {
+			#sound-dai-cells = <0>;
+			compatible = "rockchip,rk809-codec", "rockchip,rk817-codec";
+			/* mclk from i2s1 (matches factory Android DTB:
+			 * clocks = <&cru I2S1_MCLKOUT>) */
+			clocks = <&cru I2S1_MCLKOUT>;
+			clock-names = "mclk";
+			assigned-clocks = <&cru I2S1_MCLKOUT>;
+			assigned-clock-rates = <12288000>;
+			/* Factory codec grabs the i2s1m0-mclk group: this muxes
+			 * GPIO1_A2 to output MCLK.  The PAM8406 amp may need
+			 * it even though the codec driver itself ignores
+			 * pinctrl - the pinctrl subsystem applies the mux. */
+			pinctrl-names = "default";
+			pinctrl-0 = <&i2s1m0_mclk>;
+			/* PAM8406 amp enable (GPIO1_A4) is hogged high by
+			 * pinctrl instead - the codec driver's spk-ctl gpio
+			 * handling never raises the line. */
+			use-ext-amplifier;
+			hp-volume = <20>;
+			spk-volume = <18>;
 			mic-in-differential;
+			status = "okay";
 		};
 
 		/* lb2004 has no battery/charger; stub nodes keep the rk808 MFD
@@ -618,11 +678,58 @@
 };
 
 /* I2S0/1 - both labels exist in 6.1 BSP */
+&pinctrl {
+	/* rk3568-pinctrl.dtsi has no i2s0 groups (i2s0 is normally an
+	 * internal route to hdmi).  On LB2004 the PAM8406 amp listens on
+	 * i2s0 external pins (gpio3 bank, m0 mux) - define them here.
+	 * Pin map: mclk=GPIO3_A2, sclk=GPIO3_A3, lrck=GPIO3_A4,
+	 * sdo0=GPIO3_A5, sdi0=GPIO3_B1.
+	 * Groups must live under a named child node (like "i2s1 {}" in
+	 * rk3568-pinctrl.dtsi) or the pinctrl driver cannot find them. */
+	i2s0 {
+		i2s0m0_mclk: i2s0m0-mclk {
+			rockchip,pins = <3 RK_PA2 1 &pcfg_pull_none>;
+		};
+
+		i2s0m0_sclk: i2s0m0-sclk {
+			rockchip,pins = <3 RK_PA3 1 &pcfg_pull_none>;
+		};
+
+		i2s0m0_lrck: i2s0m0-lrck {
+			rockchip,pins = <3 RK_PA4 1 &pcfg_pull_none>;
+		};
+
+		i2s0m0_sdo0: i2s0m0-sdo0 {
+			rockchip,pins = <3 RK_PA5 1 &pcfg_pull_none>;
+		};
+
+		i2s0m0_sdi0: i2s0m0-sdi0 {
+			rockchip,pins = <3 RK_PB1 1 &pcfg_pull_none>;
+		};
+	};
+};
+
 &i2s0_8ch {
+	/* PAM8406 amp audio: the amp's I2S lines are tied to the HDMI
+	 * audio path, which on this board is i2s0 routed to external
+	 * pins on the gpio3 bank (see pinctrl groups above). */
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s0m0_mclk &i2s0m0_sclk &i2s0m0_lrck
+		     &i2s0m0_sdo0 &i2s0m0_sdi0>;
 	status = "okay";
 };
 
 &i2s1_8ch {
+	/* Factory Android DTB: i2s1 uses 4 pin groups (sclktx, lrcktx,
+	 * sdi0, sdo0 - phandle 0xab-0xae).  The mclk group (0x3e) lives
+	 * on the codec node - the pinctrl core claims it for the codec
+	 * at probe, so it must NOT also appear here (conflict -22).
+	 * sdo0 (gpio1-7) is the TX data line the PAM8406 amp listens on.
+	 * The dtsi default grabs all 12 groups which over-muxes GPIO1_A4
+	 * (sclkrx) that the amp enable needs. */
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s1m0_sclktx &i2s1m0_lrcktx
+		     &i2s1m0_sdi0 &i2s1m0_sdo0>;
 	status = "okay";
 };
 
@@ -1043,6 +1150,12 @@
 
 /* Pinctrl */
 &pinctrl {
+	pmic {
+		pmic_int_l: pmic-int-l {
+			rockchip,pins = <0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+	};
+
 	usb {
 		vcc5v0_usb_en: vcc5v0-usb-en {
 			rockchip,pins = <3 RK_PB3 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -1055,12 +1168,6 @@
 		};
 		hub_rst_3v3: hub-rst-3v3 {
 			rockchip,pins = <3 RK_PB4 RK_FUNC_GPIO &pcfg_pull_up>;
-		};
-	};
-
-	pmic {
-		pmic_int_l: pmic-int-l {
-			rockchip,pins = <0 RK_PA3 RK_FUNC_GPIO &pcfg_pull_up>;
 		};
 	};
 
