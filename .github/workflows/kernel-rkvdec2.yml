@@ -9,6 +9,6 @@ on:
 
 jobs:
   kernel:
-    uses: kemp233/linux-rockchip/.github/workflows/compile-z96a-rvdec.yaml@rk-6.1-rk5.1
+    uses: kemp233/linux-rockchip/.github/workflows/compile-z96a-rkvdec.yaml@rk-6.1-rkr5.1
     permissions:
       contents: write
