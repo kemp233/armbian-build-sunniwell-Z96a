@@ -1,0 +1,14 @@
+name: Build Z96A kernel (RKVDEC2)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/kernel-rkvdec2.yml'
+
+jobs:
+  kernel:
+    uses: kemp233/linux-rockchip/.github/workflows/compile-z96a-rvdec.yaml@rk-6.1-rk5.1
+    permissions:
+      contents: write
