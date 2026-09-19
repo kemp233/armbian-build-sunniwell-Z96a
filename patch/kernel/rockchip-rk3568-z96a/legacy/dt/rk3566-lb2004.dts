@@ -684,6 +684,17 @@
 	interrupt-names = "npu_irq";
 };
 
+/* NPU IOMMU - must be enabled for the dma-buf heap path: librknnrt
+ * allocates its buffers from the SYSTEM dma-heap, which returns
+ * physically scattered pages.  Without this MMU the rknpu driver can
+ * only hand the NPU one physical base address, so scattered buffers
+ * are unusable (and under-mapped kernel vmaps crashed the kernel in
+ * rknpu_job_subcore_commit).  With the MMU on, dma_map_sgtable()
+ * gives the buffer a contiguous IOVA and coalesces it to one segment. */
+&rknpu_mmu {
+	status = "okay";
+};
+
 /* NPU opp table - BSP driver bug workaround: the 6.1 branch of
  * rknpu_devfreq.c sets opp_info->supported_hw[] but never calls
  * dev_pm_opp_set_supported_hw(), so the opp framework's
