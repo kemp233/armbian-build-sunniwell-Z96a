@@ -61,6 +61,13 @@ fi
 # get PARTUUID of first partition on SD/eMMC the boot script was loaded from
 if test "${devtype}" = "mmc"; then part uuid mmc ${devnum}:${distro_bootpart} partuuid; fi
 
+# ---- LB2004: NPU DMA heap CMA size ----
+# rknpu driver allocates model memory from the "rk-dma-heap-cma" pool, which
+# defaults to only 32MB (RK_DMA_HEAP_CMA_DEFAULT_SIZE). Sense-voice INT8 is
+# 253MB and fails with ENOMEM unless we override the pool size here.
+# The linux,cma DT node is a *different* pool and is NOT used by rknpu.
+setenv extraargs "rk_dma_heap_cma=768M"
+
 setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} ubootpart=${partuuid} usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
 
 if test "${docker_optimizations}" = "on"; then setenv bootargs "${bootargs} cgroup_enable=cpuset cgroup_memory=1 cgroup_enable=memory swapaccount=1"; fi

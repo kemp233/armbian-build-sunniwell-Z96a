@@ -39,18 +39,17 @@
 		#size-cells = <2>;
 		ranges;
 
+		/* Small default CMA pool for the generic linux,cma area.
+		 * The NPU does NOT use this pool - rknpu_drv.c allocates from
+		 * the separate "rk-dma-heap-cma" pool, whose size is set by the
+		 * rk_dma_heap_cma=768M kernel command line parameter in
+		 * boot-lb2004-rk3566.cmd. A large linux,cma pool here would
+		 * conflict with the NPU pool's fixed base reservation. */
 		linux,cma {
 			compatible = "shared-dma-pool";
 			size = <0x0 0x800000>;
 			alloc-ranges = <0x0 0x10000000 0x0 0x800000>;
 			linux,cma-default;
-		};
-
-		/* 640MB DMA pool for NPU - sense-voice RKNN model needs 452MB import + ~100MB inference tensors */
-		rknpu_mem: rknpu {
-			compatible = "shared-dma-pool";
-			size = <0x0 0x28000000>;
-			alignment = <0x0 0x1000>;
 		};
 
 		ramoops: ramoops@110000 {
