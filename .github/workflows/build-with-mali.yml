@@ -24,7 +24,7 @@ on:
       armbian_ui:
         description: 'Desktop environment'
         type: choice
-        options: [server, minimal, xfce, kde, gnome]
+        options: [server, minimal, xfce, kde, gnome, cinnamon]
         default: server
       mali_gpu:
         description: 'Mali GPU variant'
