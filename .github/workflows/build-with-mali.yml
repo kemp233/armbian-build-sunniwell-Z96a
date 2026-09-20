@@ -228,7 +228,7 @@ jobs:
           cp -a build/meson-private/*.pc "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
           
           # Create control file for runtime package
-          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: ${shlibs:Depends}, ${misc:Depends}\nDescription: Mali GPU User-Space Binary Drivers (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the shared libraries.\n' \
+          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: libc6 (>= 2.17), libdrm2 (>= 2.4.75), libgbm1 (>= 20.0), libwayland-client0 (>= 1.18), libx11-xcb1, libxcb-dri2-0, libxdamage1, libxext6\nDescription: Mali GPU User-Space Binary Drivers (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the shared libraries.\n' \
             "${PKG_NAME}" "${VERSION}" "${ARCH}" "${TARGET_NAME}" > "${PKG_DIR}/DEBIAN/control"
           
           # Build the dev package
@@ -248,7 +248,7 @@ jobs:
           cp -a build/meson-private/*.pc "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
           
           # Create control file for dev package
-          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: %s (= %s), ${misc:Depends}\nDescription: Mali GPU User-Space Binary Drivers - Development files (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the development headers and pkg-config files.\n' \
+          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: %s (= %s)\nDescription: Mali GPU User-Space Binary Drivers - Development files (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the development headers and pkg-config files.\n' \
             "${DEV_PKG_NAME}" "${VERSION}" "${ARCH}" "${PKG_NAME}" "${VERSION}" "${TARGET_NAME}" > "${DEV_PKG_DIR}/DEBIAN/control"
           
           # Build the .deb packages
