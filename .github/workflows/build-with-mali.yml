@@ -91,7 +91,7 @@ jobs:
             libxcb1-dev:arm64 libx11-dev:arm64 libx11-xcb-dev:arm64 \
             libxdamage-dev:arm64 libxext-dev:arm64 libxfixes-dev:arm64 \
             libxau-dev:arm64 libxdmcp-dev:arm64 libffi-dev:arm64 libssl-dev:arm64 \
-            pkg-config meson ninja-build
+            pkg-config meson ninja-build build-essential debhelper libxcb-dri2-0-dev
 
       - name: Verify pkg-config for cross-compile
         run: |
