@@ -183,20 +183,101 @@ jobs:
           echo "=== pkg-config files ==="
           find build -name "*.pc" -type f | xargs -r ls -la
 
-      - name: Create Debian packages
+      - name: Create Debian packages manually (skip debian/rules meson re-run)
         working-directory: libmali-rockchip
-        env:
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          C_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
-          CPLUS_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
         run: |
-          # Use -d flag to skip build dependency check since we already built the binaries
-          # The debian/rules will re-run meson, so we need the cross-compile env preserved
-          dpkg-buildpackage -b -us -uc -aarm64 -d
-          mkdir -p ../mali-debs
-          cp ../*.deb ../mali-debs/
-          ls -la ../mali-debs/
+          set -e
+          echo "=== Creating Debian packages from pre-built artifacts ==="
+          
+          # Get package info from debian/changelog
+          VERSION=$(dpkg-parsechangelog -S Version | head -1)
+          PACKAGE=$(dpkg-parsechangelog -S Source | head -1)
+          ARCH="arm64"
+          
+          echo "Package: $PACKAGE, Version: $VERSION, Arch: $ARCH"
+          
+          # Determine target name from inputs
+          GPU="${{ inputs.mali_gpu }}"
+          VER="${{ inputs.mali_version }}"
+          PLATFORM="${{ inputs.mali_platform }}"
+          TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
+          
+          # Read the target configurations from debian/targets
+          # We only need the bifrost-g52-g24p0-gbm target
+          echo "Looking for target: bifrost-g52-g24p0-gbm"
+          
+          # Create package directory structure
+          DEB_DIR="../mali-debs"
+          mkdir -p "$DEB_DIR"
+          
+          # Build the runtime package
+          PKG_NAME="libmali-${TARGET_NAME}"
+          PKG_DIR="${DEB_DIR}/${PKG_NAME}_${VERSION}_${ARCH}"
+          mkdir -p "${PKG_DIR}/DEBIAN"
+          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
+          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig"
+          
+          # Copy shared libraries from our build
+          echo "Copying shared libraries..."
+          cp -a build/libmali.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/libEGL.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/libGLESv1_CM.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/libGLESv2.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/libgbm.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/libOpenCL.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          cp -a build/hook/libmali-hook.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
+          
+          # Copy pkg-config files
+          echo "Copying pkg-config files..."
+          cp -a build/meson-private/*.pc "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
+          
+          # Create control file for runtime package
+          cat > "${PKG_DIR}/DEBIAN/control" <<EOF
+Package: ${PKG_NAME}
+Version: ${VERSION}
+Architecture: ${ARCH}
+Maintainer: Putin Lee <putin.li@rock-chips.com>
+Depends: \${shlibs:Depends}, \${misc:Depends}
+Description: Mali GPU User-Space Binary Drivers (${TARGET_NAME})
+ Mali GPU proprietary drivers for Bifrost G52.
+ This package contains the shared libraries.
+EOF
+          
+          # Build the dev package
+          DEV_PKG_NAME="libmali-${TARGET_NAME}-dev"
+          DEV_PKG_DIR="${DEB_DIR}/${DEV_PKG_NAME}_${VERSION}_${ARCH}"
+          mkdir -p "${DEV_PKG_DIR}/DEBIAN"
+          mkdir -p "${DEV_PKG_DIR}/usr/include"
+          mkdir -p "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu"
+          mkdir -p "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig"
+          
+          # Copy headers if they exist
+          if [ -d "include" ]; then
+            cp -a include/* "${DEV_PKG_DIR}/usr/include/"
+          fi
+          
+          # Copy pkg-config files
+          cp -a build/meson-private/*.pc "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
+          
+          # Create control file for dev package
+          cat > "${DEV_PKG_DIR}/DEBIAN/control" <<EOF
+Package: ${DEV_PKG_NAME}
+Version: ${VERSION}
+Architecture: ${ARCH}
+Maintainer: Putin Lee <putin.li@rock-chips.com>
+Depends: ${PKG_NAME} (= ${VERSION}), \${misc:Depends}
+Description: Mali GPU User-Space Binary Drivers - Development files (${TARGET_NAME})
+ Mali GPU proprietary drivers for Bifrost G52.
+ This package contains the development headers and pkg-config files.
+EOF
+          
+          # Build the .deb packages
+          echo "Building .deb packages..."
+          dpkg-deb --build "${PKG_DIR}" "${DEB_DIR}/"
+          dpkg-deb --build "${DEV_PKG_DIR}" "${DEB_DIR}/"
+          
+          # List created packages
+          ls -la "${DEB_DIR}/"
 
       - name: Package artifacts for Armbian job
         id: package
