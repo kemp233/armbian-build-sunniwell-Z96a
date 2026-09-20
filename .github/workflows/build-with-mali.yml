@@ -133,7 +133,8 @@ jobs:
           endian = 'little'
 
           [properties]
-          sys_root = '/usr/aarch64-linux-gnu'
+          # arm64 headers are at /usr/include (not /usr/aarch64-linux-gnu/usr/include)
+          # sys_root = '/usr/aarch64-linux-gnu'  # Commented out - causes wrong include paths
           pkg_config_path = '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
           EOF
 
@@ -142,6 +143,9 @@ jobs:
         env:
           PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          # arm64 headers are in standard locations, not under sysroot
+          C_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
+          CPLUS_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
         run: |
           meson setup build \
             --cross-file ../cross.txt \
