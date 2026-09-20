@@ -46,10 +46,10 @@
 			linux,cma-default;
 		};
 
-		/* 512MB DMA pool for NPU - sense-voice RKNN model needs ~473MB */
+		/* 640MB DMA pool for NPU - sense-voice RKNN model needs 452MB import + ~100MB inference tensors */
 		rknpu_mem: rknpu {
 			compatible = "shared-dma-pool";
-			size = <0x0 0x20000000>;
+			size = <0x0 0x28000000>;
 			alignment = <0x0 0x1000>;
 		};
 
