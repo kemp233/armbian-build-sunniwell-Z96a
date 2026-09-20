@@ -62,7 +62,7 @@ jobs:
 
       - name: Install cross-compilation toolchain & deps
         run: |
-          sudo apt-get update
+          sudo dpkg --add-architecture arm64 && sudo apt-get update
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
             libdrm-dev:aarch64 libgbm-dev:aarch64 libwayland-dev:aarch64 \
