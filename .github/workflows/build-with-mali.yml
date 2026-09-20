@@ -93,6 +93,19 @@ jobs:
             libxau-dev:arm64 libxdmcp-dev:arm64 libffi-dev:arm64 libssl-dev:arm64 \
             pkg-config meson ninja-build
 
+      - name: Verify pkg-config for cross-compile
+        run: |
+          echo "=== PKG_CONFIG_PATH ==="
+          echo $PKG_CONFIG_PATH
+          echo "=== Checking /usr/aarch64-linux-gnu/lib/pkgconfig ==="
+          ls -la /usr/aarch64-linux-gnu/lib/pkgconfig/ 2>/dev/null | head -20
+          echo "=== Checking drm.pc ==="
+          cat /usr/aarch64-linux-gnu/lib/pkgconfig/drm.pc 2>/dev/null || echo "NOT FOUND"
+          echo "=== Testing pkg-config libdrm ==="
+          PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig pkg-config --cflags --libs libdrm 2>&1 || echo "FAILED"
+          echo "=== Testing pkg-config gbm ==="
+          PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig pkg-config --cflags --libs gbm 2>&1 || echo "FAILED"
+
       - name: Create cross file
         run: |
           cat > cross.txt <<'EOF'
