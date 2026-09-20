@@ -400,7 +400,14 @@ jobs:
           cd build
           git checkout ${{ inputs.armbian_branch }}
 
-          ./compile.sh "${{ inputs.armbian_target }}" \
+          # Map armbian_target input to valid Armbian commands
+          # "kernel" -> "kernel", "image" -> "build"
+          ARMBIAN_COMMAND="${{ inputs.armbian_target }}"
+          if [[ "${ARMBIAN_COMMAND}" == "image" ]]; then
+            ARMBIAN_COMMAND="build"
+          fi
+
+          ./compile.sh "${ARMBIAN_COMMAND}" \
             REVISION="${{ env.ARMBIAN_VERSION }}" \
             BOARD="z96a-rk3568-laptop" \
             BRANCH="${{ inputs.armbian_kernel_branch }}" \
