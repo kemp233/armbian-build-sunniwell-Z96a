@@ -411,7 +411,7 @@ jobs:
 
           ./compile.sh "${ARMBIAN_COMMAND}" \
             REVISION="${{ env.ARMBIAN_VERSION }}" \
-            BOARD="z96a-rk3568-laptop" \
+            BOARD="z96a-v2" \
             BRANCH="${{ inputs.armbian_kernel_branch }}" \
             RELEASE="${{ inputs.armbian_release }}" \
             KERNEL_CONFIGURE="no" \
