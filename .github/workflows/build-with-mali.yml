@@ -202,10 +202,6 @@ jobs:
           PLATFORM="${{ inputs.mali_platform }}"
           TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
           
-          # Read the target configurations from debian/targets
-          # We only need the bifrost-g52-g24p0-gbm target
-          echo "Looking for target: bifrost-g52-g24p0-gbm"
-          
           # Create package directory structure
           DEB_DIR="../mali-debs"
           mkdir -p "$DEB_DIR"
@@ -232,16 +228,8 @@ jobs:
           cp -a build/meson-private/*.pc "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
           
           # Create control file for runtime package
-          cat > "${PKG_DIR}/DEBIAN/control" <<EOF
-Package: ${PKG_NAME}
-Version: ${VERSION}
-Architecture: ${ARCH}
-Maintainer: Putin Lee <putin.li@rock-chips.com>
-Depends: \${shlibs:Depends}, \${misc:Depends}
-Description: Mali GPU User-Space Binary Drivers (${TARGET_NAME})
- Mali GPU proprietary drivers for Bifrost G52.
- This package contains the shared libraries.
-EOF
+          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: ${shlibs:Depends}, ${misc:Depends}\nDescription: Mali GPU User-Space Binary Drivers (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the shared libraries.\n' \
+            "${PKG_NAME}" "${VERSION}" "${ARCH}" "${TARGET_NAME}" > "${PKG_DIR}/DEBIAN/control"
           
           # Build the dev package
           DEV_PKG_NAME="libmali-${TARGET_NAME}-dev"
@@ -260,16 +248,8 @@ EOF
           cp -a build/meson-private/*.pc "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
           
           # Create control file for dev package
-          cat > "${DEV_PKG_DIR}/DEBIAN/control" <<EOF
-Package: ${DEV_PKG_NAME}
-Version: ${VERSION}
-Architecture: ${ARCH}
-Maintainer: Putin Lee <putin.li@rock-chips.com>
-Depends: ${PKG_NAME} (= ${VERSION}), \${misc:Depends}
-Description: Mali GPU User-Space Binary Drivers - Development files (${TARGET_NAME})
- Mali GPU proprietary drivers for Bifrost G52.
- This package contains the development headers and pkg-config files.
-EOF
+          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: %s (= %s), ${misc:Depends}\nDescription: Mali GPU User-Space Binary Drivers - Development files (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the development headers and pkg-config files.\n' \
+            "${DEV_PKG_NAME}" "${VERSION}" "${ARCH}" "${PKG_NAME}" "${VERSION}" "${TARGET_NAME}" > "${DEV_PKG_DIR}/DEBIAN/control"
           
           # Build the .deb packages
           echo "Building .deb packages..."
