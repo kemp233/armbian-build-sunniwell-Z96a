@@ -95,8 +95,10 @@ jobs:
 
       - name: Install native build dependencies (for dpkg-buildpackage)
         run: |
+          # dpkg-buildpackage -aarm64 checks build deps for arm64 arch, so install arm64 versions
           sudo apt-get install -y \
-            build-essential debhelper libxcb-dri2-0 libx11-xcb1 libxdamage1 libxext6 libwayland-client0
+            build-essential debhelper \
+            libxcb-dri2-0:arm64 libx11-xcb1:arm64 libxdamage1:arm64 libxext6:arm64 libwayland-client0:arm64
 
       - name: Verify pkg-config for cross-compile
         run: |
