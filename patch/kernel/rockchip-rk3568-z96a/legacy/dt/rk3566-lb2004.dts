@@ -713,16 +713,6 @@
 	opp-1000000000 { /delete-property/ opp-supported-hw; };
 };
 
-/* OTP - the dtsi ships short clock-names ("usr","sbpi","apb","phy") but
- * the rockchip-otp driver (rk3568_data) looks them up by full names via
- * devm_clk_bulk_get, so clk lookup fails with -ENOENT, OTP never probes,
- * nvmem cells are missing, and bus-npu cannot read leakage -> NPU opp
- * table init fails ("failed to add opp table").  Restore the names the
- * driver expects. */
-&otp {
-	clock-names = "clk_otpc_ns_usr", "clk_otpc_ns_sbpi",
-		      "pclk_otpc_ns", "pclk_otpphy";
-};
 &pinctrl {
 	/* rk3568-pinctrl.dtsi has no i2s0 groups (i2s0 is normally an
 	 * internal route to hdmi).  On LB2004 the PAM8406 amp listens on
