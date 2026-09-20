@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: lb2004 <lb2004@lb2004>
+Date: Sat, 20 Sep 2026 12:30:00 +0000
+Subject: [PATCH] dma-buf: downgrade vmapping_counter BUG_ON to WARN_ON
+
+The rknpu v0.9.8 driver on rk3566 triggers a vmap/vunmap imbalance
+(dma_buf_vmap without matching dma_buf_vunmap before fd close) when
+running large RKNN models. The imbalance only surfaces during process
+exit (dma_buf_release), causing a fatal kernel panic that reboots the
+board after every inference run.
+
+Downgrade BUG_ON(dmabuf->vmapping_counter) to WARN_ON so the leak is
+still reported but no longer kills the machine. This matches what
+mainline Linux eventually did with these checks.
+
+Signed-off-by: lb2004 <lb2004@lb2004>
+---
+ drivers/dma-buf/dma-buf.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/drivers/dma-buf/dma-buf.c b/drivers/dma-buf/dma-buf.c
+index 111111111111..222222222222 100644
+--- a/drivers/dma-buf/dma-buf.c
++++ b/drivers/dma-buf/dma-buf.c
+@@ -143,7 +143,7 @@ static void dma_buf_release(struct dentry *dentry)
+ 	if (unlikely(!dmabuf))
+ 		return;
+ 
+-	BUG_ON(dmabuf->vmapping_counter);
++	WARN_ON(dmabuf->vmapping_counter);
+ 
+ 	/*
+ 	 * If you hit this BUG() it could mean:
+-- 
+2.34.1
