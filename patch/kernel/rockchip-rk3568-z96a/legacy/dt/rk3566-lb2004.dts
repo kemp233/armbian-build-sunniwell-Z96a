@@ -41,7 +41,6 @@
 
 		linux,cma {
 			compatible = "shared-dma-pool";
-			reusable;
 			size = <0x0 0x800000>;
 			alloc-ranges = <0x0 0x10000000 0x0 0x800000>;
 			linux,cma-default;
@@ -50,8 +49,6 @@
 		/* 512MB DMA pool for NPU - sense-voice RKNN model needs ~473MB */
 		rknpu_mem: rknpu {
 			compatible = "shared-dma-pool";
-			inactive;
-			reusable;
 			size = <0x0 0x20000000>;
 			alignment = <0x0 0x1000>;
 		};
