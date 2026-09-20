@@ -185,8 +185,15 @@ jobs:
 
       - name: Create Debian packages
         working-directory: libmali-rockchip
+        env:
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          C_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
+          CPLUS_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
         run: |
-          dpkg-buildpackage -b -us -uc -aarm64
+          # Use -d flag to skip build dependency check since we already built the binaries
+          # The debian/rules will re-run meson, so we need the cross-compile env preserved
+          dpkg-buildpackage -b -us -uc -aarm64 -d
           mkdir -p ../mali-debs
           cp ../*.deb ../mali-debs/
           ls -la ../mali-debs/
