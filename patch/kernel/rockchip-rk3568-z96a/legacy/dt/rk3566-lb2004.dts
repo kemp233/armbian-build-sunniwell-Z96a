@@ -47,12 +47,12 @@
 			linux,cma-default;
 		};
 
-		/* 128MB DMA pool for NPU - reserved_memory node, valid in both forks */
+		/* 512MB DMA pool for NPU - sense-voice RKNN model needs ~473MB */
 		rknpu_mem: rknpu {
 			compatible = "shared-dma-pool";
 			inactive;
 			reusable;
-			size = <0x0 0x08000000>;
+			size = <0x0 0x20000000>;
 			alignment = <0x0 0x1000>;
 		};
 
