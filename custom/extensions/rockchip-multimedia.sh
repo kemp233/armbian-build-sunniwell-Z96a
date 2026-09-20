@@ -62,8 +62,9 @@ function _rockchip_multimedia_fetch_pinned() {
 
 # Build host: cross toolchain + build systems for MPP and the VA-API driver.
 # libdrm-dev is needed by the libmali GBM blob's meson dependency check.
+# meson is needed to build the libmali wrapper libraries.
 function add_host_dependencies__rockchip_multimedia_host_deps() {
-	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build autoconf automake libtool pkg-config libdrm-dev"
+	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build meson autoconf automake libtool pkg-config libdrm-dev"
 }
 
 function post_family_config__rockchip_multimedia_gles_packages() {
