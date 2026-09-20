@@ -1,0 +1,417 @@
+name: Build Armbian Z96A with Mali G52 (bifrost-g52-g24p0-gbm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      armbian_release:
+        description: 'Armbian release'
+        type: choice
+        options: [jammy, noble, bookworm]
+        default: jammy
+      armbian_branch:
+        description: 'Armbian build framework branch'
+        type: string
+        default: main
+      armbian_kernel_branch:
+        description: 'Kernel branch'
+        type: string
+        default: legacy
+      armbian_target:
+        description: 'Build target'
+        type: choice
+        options: [kernel, image]
+        default: image
+      armbian_ui:
+        description: 'Desktop environment'
+        type: choice
+        options: [server, minimal, xfce, kde, gnome]
+        default: server
+      mali_gpu:
+        description: 'Mali GPU variant'
+        type: choice
+        options: [bifrost-g52, bifrost-g31, valhall-g310, valhall-g610]
+        default: bifrost-g52
+      mali_version:
+        description: 'Mali GPU version'
+        type: string
+        default: g24p0
+      mali_platform:
+        description: 'Mali platform'
+        type: choice
+        options: [gbm, wayland-gbm, x11-gbm]
+        default: gbm
+
+permissions:
+  contents: write
+
+jobs:
+  # ============================================================
+  # 1. Cross-compile Mali G52 drivers (reuses libmali-rockchip logic)
+  # ============================================================
+  build-mali:
+    name: Cross-compile Mali G52
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact-name }}
+    steps:
+      - name: Checkout libmali-rockchip (for build scripts & blobs)
+        uses: actions/checkout@v4
+        with:
+          repository: kemp233/libmali-rockchip
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: libmali-rockchip
+
+      - name: Install cross-compilation toolchain & deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            libdrm-dev:aarch64 libgbm-dev:aarch64 libwayland-dev:aarch64 \
+            libxcb1-dev:aarch64 libx11-dev:aarch64 libx11-xcb-dev:aarch64 \
+            libxdamage-dev:aarch64 libxext-dev:aarch64 libxfixes-dev:aarch64 \
+            libxau-dev:aarch64 libxdmcp-dev:aarch64 libffi-dev:aarch64 libssl-dev:aarch64 \
+            pkg-config meson ninja-build
+
+      - name: Create cross file
+        run: |
+          cat > cross.txt <<'EOF'
+          [binaries]
+          c = '/usr/bin/aarch64-linux-gnu-gcc'
+          cpp = '/usr/bin/aarch64-linux-gnu-g++'
+          ar = '/usr/bin/aarch64-linux-gnu-gcc-ar'
+          strip = '/usr/bin/aarch64-linux-gnu-strip'
+          pkgconfig = '/usr/bin/pkg-config'
+
+          [host_machine]
+          system = 'linux'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+
+          [build_machine]
+          system = 'linux'
+          cpu_family = 'x86_64'
+          cpu = 'x86_64'
+          endian = 'little'
+
+          [properties]
+          sys_root = '/usr/aarch64-linux-gnu'
+          pkg_config_path = '/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig'
+          EOF
+
+      - name: Configure Meson
+        working-directory: libmali-rockchip
+        run: |
+          meson setup build \
+            --cross-file ../cross.txt \
+            -Darch=aarch64 \
+            -Dgpu=${{ inputs.mali_gpu }} \
+            -Dversion=${{ inputs.mali_version }} \
+            -Dsubversion=none \
+            -Dplatform=${{ inputs.mali_platform }} \
+            -Dopencl-icd=false \
+            -Dhooks=true \
+            -Dwrappers=enabled \
+            -Doptimize-level=O3 \
+            -Dprefix=/usr \
+            -Dlibdir=lib/aarch64-linux-gnu \
+            -Dbuildtype=release \
+            -Ddefault_library=shared
+
+      - name: Build with Ninja
+        working-directory: libmali-rockchip
+        run: |
+          ninja -C build -v
+
+      - name: Verify build artifacts
+        working-directory: libmali-rockchip
+        run: |
+          echo "=== Shared libraries ==="
+          find build -name "*.so*" -type f | xargs -r ls -la
+          echo "=== pkg-config files ==="
+          find build -name "*.pc" -type f | xargs -r ls -la
+          echo "=== Verify EGL symbols ==="
+          find build -name "libEGL.so*" -type f | head -1 | xargs -r aarch64-linux-gnu-nm -D | grep eglCreateContext || true
+          echo "=== Verify GBM symbols ==="
+          find build -name "libgbm.so*" -type f | head -1 | xargs -r aarch64-linux-gnu-nm -D | grep gbm_create_device || true
+
+      - name: Create Debian packages (using libmali-rockchip debian rules)
+        working-directory: libmali-rockchip
+        run: |
+          # Build debian packages for aarch64
+          dpkg-buildpackage -b -us -uc -aarm64
+          
+          # Copy debs to known location
+          mkdir -p ../mali-debs
+          cp ../*.deb ../mali-debs/
+          ls -la ../mali-debs/
+
+      - name: Package artifacts for Armbian job
+        id: package
+        run: |
+          ARTIFACT_NAME=libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
+          mkdir -p artifacts/${ARTIFACT_NAME}
+          
+          # Copy .deb packages
+          cp ../mali-debs/*.deb artifacts/${ARTIFACT_NAME}/
+          
+          # Also copy raw libraries for direct installation fallback
+          find libmali-rockchip/build -name "*.so*" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
+          find libmali-rockchip/build -name "*.pc" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
+          
+          # Create manifest
+          find artifacts/${ARTIFACT_NAME} -type f | sort > artifacts/${ARTIFACT_NAME}/MANIFEST.txt
+          
+          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+          echo "=== Artifact contents ==="
+          ls -la artifacts/${ARTIFACT_NAME}/
+
+      - name: Upload Mali artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact-name }}
+          path: artifacts/
+          retention-days: 7
+
+  # ============================================================
+  # 2. Build Armbian image with Mali packages
+  # ============================================================
+  build-armbian:
+    name: Build Armbian Image (Z96A)
+    needs: build-mali
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout Armbian build repo (this repo)
+        uses: actions/checkout@v4
+        with:
+          repository: kemp233/armbian-build-sunniwell-Z96a
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download Mali artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build-mali.outputs.artifact-name }}
+          path: mali-artifacts
+
+      - name: Prepare Mali packages for Armbian build
+        shell: bash
+        run: |
+          set -e
+          echo "=== Mali artifacts downloaded ==="
+          ls -la mali-artifacts/
+          
+          # Create local repo structure inside build packages
+          mkdir -p mali-repo
+          find mali-artifacts -name "*.deb" -type f -exec cp {} mali-repo/ \;
+          cd mali-repo
+          apt-ftparchive packages . > Packages
+          gzip -c Packages > Packages.gz
+          cd ..
+          echo "MALI_REPO_PATH=$(pwd)/mali-repo" >> $GITHUB_ENV
+
+      - name: Free disk space
+        uses: descriptinc/free-disk-space@main
+        with:
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Import GPG key (if provided)
+        if: ${{ env.ARMBIAN_PGP_KEY != '' }}
+        uses: crazy-max/ghaction-import-gpg@v6
+        with:
+          gpg_private_key: ${{ secrets.ARMBIAN_PGP_KEY }}
+          passphrase: ${{ secrets.ARMBIAN_PGP_PASSWORD }}
+
+      - name: Clone Armbian OS & Build framework
+        shell: bash
+        run: |
+          git clone --depth=1 https://github.com/armbian/os.git os
+          git clone --depth=1 https://github.com/momokind/armbian-build.git build
+
+      - name: Prepare customisations
+        shell: bash
+        run: |
+          mkdir -p custom
+          for dir in config patch packages extensions blobs; do
+            if [[ -d "$dir" ]]; then
+              cp -r "$dir" custom/
+            fi
+          done
+          [[ -d userpatches ]] && cp -r userpatches custom/
+          
+          mkdir -p custom/lib/functions/rootfs
+          for lib_file in rootfs/rootfs-create.sh rootfs/apt-install.sh; do
+            if [[ -f "lib/functions/${lib_file}" ]]; then
+              cp -v "lib/functions/${lib_file}" "custom/lib/functions/${lib_file}"
+            fi
+          done
+
+      - name: Setup Armbian version
+        shell: bash
+        run: |
+          cat os/stable.json | jq '.version' | sed 's/"//g' | sed 's/^/ARMBIAN_VERSION=/' >> $GITHUB_ENV
+          echo "ARMBIAN_VERSION=${{ env.ARMBIAN_VERSION }}-mali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-$(date +%Y%m%d)" >> $GITHUB_ENV
+
+      - name: Apply custom config & patches
+        shell: bash
+        run: |
+          mkdir -pv build/userpatches
+          rsync -av os/userpatches/. build/userpatches/
+          [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. build/userpatches/
+
+          [[ -d custom/config/boards ]] && rsync -av custom/config/boards/. build/config/boards/
+          [[ -d custom/config/kernel ]] && rsync -av custom/config/kernel/. build/config/kernel/
+          [[ -d custom/config/bootenv ]] && rsync -av custom/config/bootenv/. build/config/bootenv/
+          [[ -d custom/config/bootscripts ]] && rsync -av custom/config/bootscripts/. build/config/bootscripts/
+          [[ -d custom/config/sources ]] && rsync -av custom/config/sources/. build/config/sources/
+          [[ -d custom/patch ]] && rsync -av custom/patch/. build/patch/
+          [[ -d custom/packages ]] && rsync -av custom/packages/. build/packages/
+          [[ -d custom/config/optional ]] && rsync -av custom/config/optional/. build/config/optional/
+          [[ -d custom/lib ]] && rsync -av custom/lib/. build/lib/
+          [[ -d custom/extensions ]] && rsync -av custom/extensions/. build/extensions/
+
+          rm -fv build/patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+
+      - name: Inject Mali repo & install hook
+        shell: bash
+        run: |
+          # Copy Mali local repo into build packages
+          mkdir -p build/packages/extras-buildpkgs/mali-g52-g24p0
+          cp -r ${{ env.MALI_REPO_PATH }}/* build/packages/extras-buildpkgs/mali-g52-g24p0/
+          
+          # Create custom post-install script that runs during image customization
+          cat > build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh <<'INSTALL_EOF'
+#!/bin/bash
+set -e
+echo "=== [Mali G52] Installing proprietary GPU drivers ==="
+
+# Add local repo to target rootfs
+echo "deb [trusted=yes] file:/packages/extras-buildpkgs/mali-g52-g24p0 ./" > /etc/apt/sources.list.d/mali-local.list
+apt-get update
+
+# Install Mali packages (non-interactive)
+DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \
+  libmali-bifrost-g52-g24p0-gbm \
+  libmali-bifrost-g52-g24p0-gbm-dev 2>/dev/null || true
+
+# Verify installation
+echo "=== [Mali G52] Verifying installation ==="
+ls -la /usr/lib/aarch64-linux-gnu/libmali* /usr/lib/aarch64-linux-gnu/libEGL* /usr/lib/aarch64-linux-gnu/libGLESv2* /usr/lib/aarch64-linux-gnu/libgbm* 2>/dev/null || true
+
+# Setup alternatives for EGL/GLES (Mali provides these)
+update-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/libEGL.so.1 100 2>/dev/null || true
+update-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/libGLESv2.so.2 100 2>/dev/null || true
+update-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/libgbm.so.1 100 2>/dev/null || true
+
+# Add Mali library path to ldconfig
+echo "/usr/lib/aarch64-linux-gnu" > /etc/ld.so.conf.d/mali.conf
+ldconfig
+
+# Ensure video group exists and render permissions
+groupadd -f video
+groupadd -f render
+
+echo "=== [Mali G52] Installation complete ==="
+INSTALL_EOF
+          chmod +x build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
+
+          # Create a customize-image hook to run the install script
+          cat > build/config/optional/mali-g52-g24p0.conf <<'HOOK_EOF'
+# Mali G52 GBM driver hook for Z96A
+# This will be sourced during customize-image phase
+
+if [[ "${BOARDFAMILY}" == "rockchip-rk3568-z96a" ]]; then
+    # The install script will be copied to target and executed
+    # via a late customize hook
+    EXTRA_IMAGE_INSTALL_SCRIPTS+=" install-mali-g52"
+fi
+HOOK_EOF
+
+      - name: Build Armbian image
+        shell: bash
+        run: |
+          if [[ "${{ inputs.armbian_ui }}" == minimal ]]; then
+            BUILD_DESKTOP="no"
+            BUILD_MINIMAL="yes"
+          elif [[ "${{ inputs.armbian_ui }}" == server ]]; then
+            BUILD_DESKTOP="no"
+            BUILD_MINIMAL="no"
+          else
+            BUILD_DESKTOP="yes"
+            BUILD_MINIMAL="no"
+            DESKTOP_ENVIRONMENT="${{ inputs.armbian_ui }}"
+            DESKTOP_APPGROUPS_SELECTED=""
+            DESKTOP_ENVIRONMENT_CONFIG_NAME="config_base"
+          fi
+
+          cd build
+          git checkout ${{ inputs.armbian_branch }}
+
+          ./compile.sh "${{ inputs.armbian_target }}" \
+            REVISION="${{ env.ARMBIAN_VERSION }}" \
+            BOARD="z96a-rk3568-laptop" \
+            BRANCH="${{ inputs.armbian_kernel_branch }}" \
+            RELEASE="${{ inputs.armbian_release }}" \
+            KERNEL_CONFIGURE="no" \
+            BUILD_DESKTOP="${BUILD_DESKTOP}" \
+            BUILD_MINIMAL="${BUILD_MINIMAL}" \
+            DESKTOP_ENVIRONMENT="${DESKTOP_ENVIRONMENT}" \
+            DESKTOP_APPGROUPS_SELECTED="${DESKTOP_APPGROUPS_SELECTED}" \
+            DESKTOP_ENVIRONMENT_CONFIG_NAME="${DESKTOP_ENVIRONMENT_CONFIG_NAME}" \
+            ENABLE_EXTENSIONS="" \
+            COMPRESS_OUTPUTIMAGE="sha,img,xz" \
+            SHARE_LOG="yes" \
+            EXPERT="yes"
+
+      - name: Verify Mali in output
+        shell: bash
+        run: |
+          echo "=== Build completed ==="
+          ls -la build/output/images/
+          
+          # List Mali packages that were built/included
+          find build/output -name "*mali*" -type f 2>/dev/null | head -20
+
+      - name: Release
+        uses: ncipollo/release-action@v1
+        if: github.event_name != 'pull_request'
+        with:
+          tag: ${{ env.ARMBIAN_VERSION }}
+          name: "Armbian Z96A + Mali G52 ${{ inputs.mali_version }} ${{ inputs.mali_platform }}"
+          artifacts: "build/output/images/*"
+          allowUpdates: true
+          removeArtifacts: false
+          replacesArtifacts: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            Armbian for Sunniwell Z96A (RK3568) with Mali Bifrost G52 GPU drivers.
+            
+            **Mali Driver:** bifrost-g52-g24p0-gbm (proprietary, GBM platform)
+            **Kernel:** 6.1.y (legacy) from kemp233/linux-rockchip
+            **Release:** ${{ inputs.armbian_release }}
+            **Desktop:** ${{ inputs.armbian_ui }}
+            
+            Includes:
+            - libmali (wrapper + hook)
+            - libEGL / libGLESv2 / libgbm
+            - pkg-config files
+            - Headers
+            
+            Built with: Armbian Build Framework + integrated Mali cross-compile
+
+      - name: Upload build logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: armbian-build-logs
+          path: |
+            build/output/debug/
+            build/*.log
+          retention-days: 7
