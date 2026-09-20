@@ -87,10 +87,10 @@ jobs:
         run: |
           sudo apt-get install -y \
             gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
-            libdrm-dev:aarch64 libgbm-dev:aarch64 libwayland-dev:aarch64 \
-            libxcb1-dev:aarch64 libx11-dev:aarch64 libx11-xcb-dev:aarch64 \
-            libxdamage-dev:aarch64 libxext-dev:aarch64 libxfixes-dev:aarch64 \
-            libxau-dev:aarch64 libxdmcp-dev:aarch64 libffi-dev:aarch64 libssl-dev:aarch64 \
+            libdrm-dev:arm64 libgbm-dev:arm64 libwayland-dev:arm64 \
+            libxcb1-dev:arm64 libx11-dev:arm64 libx11-xcb-dev:arm64 \
+            libxdamage-dev:arm64 libxext-dev:arm64 libxfixes-dev:arm64 \
+            libxau-dev:arm64 libxdmcp-dev:arm64 libffi-dev:arm64 libssl-dev:arm64 \
             pkg-config meson ninja-build
 
       - name: Create cross file
