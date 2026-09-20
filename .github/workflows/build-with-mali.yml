@@ -122,6 +122,9 @@ jobs:
 
       - name: Configure Meson
         working-directory: libmali-rockchip
+        env:
+          PKG_CONFIG_PATH: /usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig
+          PKG_CONFIG_LIBDIR: /usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig
         run: |
           meson setup build \
             --cross-file ../cross.txt \
