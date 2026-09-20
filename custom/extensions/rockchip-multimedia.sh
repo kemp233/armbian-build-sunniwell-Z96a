@@ -61,20 +61,73 @@ function _rockchip_multimedia_fetch_pinned() {
 }
 
 # Build host: cross toolchain + build systems for MPP and the VA-API driver.
+# libdrm-dev is needed by the libmali GBM blob's meson dependency check.
 function add_host_dependencies__rockchip_multimedia_host_deps() {
-	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build autoconf automake libtool pkg-config"
+	declare -g EXTRA_BUILD_DEPS="${EXTRA_BUILD_DEPS} gcc-aarch64-linux-gnu g++-aarch64-linux-gnu cmake ninja-build autoconf automake libtool pkg-config libdrm-dev"
 }
 
 function post_family_config__rockchip_multimedia_gles_packages() {
 	[[ "${BOARDFAMILY:-}" != "rockchip-rk3568-z96a" ]] && return 0
-	display_alert "rockchip-multimedia" "adding Mesa GLES userspace packages" "info"
-	# Mesa Panfrost provides EGL/GLES3.1; libgl1-mesa-dri ships the gallium drivers.
-	# libva2/libva-drm2 runtime + vainfo for the VA-API->MPP decode path.
+	display_alert "rockchip-multimedia" "adding GLES userspace packages" "info"
+	# libmali blob provides EGL/GLES3.2; keep libgl1-mesa-dri for the GLX/swrast
+	# fallback and libva2/libva-drm2 + vainfo for the VA-API->MPP decode path.
+	# Mesa's libEGL/libGLESv2 are replaced by the blob at install time below.
 	add_packages_to_image libegl1 libgles2 libgl1-mesa-dri libva2 libva-drm2 vainfo
 	if [[ "${BUILD_MINIMAL:-}" != "yes" ]]; then
 		add_packages_to_image glmark2-es2 # on-device GLES sanity check
 	fi
 	return 0
+}
+
+# Mali-G52 (Bifrost, CSF) proprietary userspace from tsukumijima/libmali-rockchip.
+# Kernel side is CONFIG_MALI_BIFROST + CONFIG_MALI_CSF_SUPPORT (r18p0 kbase),
+# so the matching userspace DDK is g24p0. The blob ships EGL/GLES3.2/OpenCL;
+# it has no Vulkan, which is why Mesa panvk is not a replacement here.
+declare -g EXT_LIBMALI_GIT="https://github.com/tsukumijima/libmali-rockchip.git"
+declare -g EXT_LIBMALI_REF="bd33ee262f47fd936b831afccaa0759b3ecc2482" # v1.9-1-20260312
+declare -g EXT_LIBMALI_GPU="bifrost-g52"
+declare -g EXT_LIBMALI_VERSION="g24p0"
+# 'gbm' blob links only libdrm; the x11-wayland-gbm variant additionally needs
+# wayland/X11 dev packages present at build time on the host. GBM EGL is enough
+# for both Xorg (via modesetting) and Wayland compositors on this stack.
+declare -g EXT_LIBMALI_PLATFORM="${EXT_LIBMALI_PLATFORM:-gbm}"
+
+# Cross-compile libmali's wrapper libraries (libEGL/libGLESv2/...) against the
+# prebuilt blob. Meson runs on the host; only the wrapper .so files are built,
+# the 56MB blob itself is copied as-is.
+function _rockchip_multimedia_build_libmali() {
+	local work_dir="${1}" stage="${2}" prefix="${3}"
+	local lib_dir="usr/lib/aarch64-linux-gnu"
+	local src="${work_dir}/src/libmali"
+	local build="${work_dir}/build/libmali"
+
+	_rockchip_multimedia_fetch_pinned "${EXT_LIBMALI_GIT}" "${EXT_LIBMALI_REF}" "${src}"
+
+	# The wrapper .so files are arch-independent trampolines that dlopen
+	# libmali, so they are built with the host compiler. meson picks the blob
+	# via scripts/grabber.sh from (gpu, version, platform, optimize-level).
+	run_host_command_logged meson setup "${build}" "${src}" \
+		"-Darch=aarch64" \
+		"-Dgpu=${EXT_LIBMALI_GPU}" \
+		"-Dversion=${EXT_LIBMALI_VERSION}" \
+		"-Dplatform=${EXT_LIBMALI_PLATFORM}" \
+		"-Dopencl-icd=false" \
+		"-Dhooks=true" \
+		"-Dwrappers=auto" \
+		"-Doptimize-level=O3" \
+		"--default-library=shared" \
+		"--prefix=/usr" \
+		"--libdir=${lib_dir#usr/}" \
+		"--buildtype=release"
+	run_host_command_logged ninja -C "${build}"
+	run_host_command_logged env DESTDIR="${stage}" ninja -C "${build}" install
+
+	# udev node for the kbase driver (mali0) + render node permissions.
+	mkdir -p "${stage}/etc/udev/rules.d"
+	cat > "${stage}/etc/udev/rules.d/50-mali.rules" <<- 'EOT'
+		KERNEL=="mali0", MODE="0660", GROUP="video"
+		KERNEL=="mali", MODE="0660", GROUP="video"
+	EOT
 }
 
 # Resolve the aarch64 cross-compiler prefix. Prefer the framework's own
@@ -293,8 +346,30 @@ function pre_customize_image__rockchip_multimedia_install() {
 		display_alert "rockchip-multimedia" "firefox-esr not in image, skipping browser prefs" "info"
 	fi
 
+	# ------------------------------------------------------------- libmali --
+	# Mali-G52 proprietary userspace (EGL/GLES3.2/OpenCL). The blob is built
+	# against CONFIG_MALI_BIFROST+CSF, so its libEGL/libGLESv2 must win over
+	# Mesa's; dpkg alternatives are not used because Debian's mesa packages
+	# do not register GL alternatives, so the files are overwritten directly.
+	display_alert "rockchip-multimedia" "building libmali (G52 g24p0 ${EXT_LIBMALI_PLATFORM})" "info"
+	if [[ ! -e "${stage}/${lib_dir}/libmali.so.1.9.0" ]]; then
+		_rockchip_multimedia_build_libmali "${work_dir}" "${stage}" "${prefix}"
+	else
+		display_alert "rockchip-multimedia" "libmali already staged, reusing" "debug"
+	fi
+
 	display_alert "rockchip-multimedia" "copying staged userspace into rootfs" "info"
 	run_host_command_logged cp -av "${stage}/." "${SDCARD}/"
+
+	# libmali's wrappers replace Mesa's GL stack. Mesa's libGL (GLX on X) stays,
+	# but libEGL/libGLESv2 must point at the blob for hardware acceleration.
+	# Move Mesa's copies aside (not remove: GLX still needs libgl1-mesa-dri).
+	for _gl in libEGL.so.1 libGLESv2.so.2 libOpenCL.so.1; do
+		if [[ -e "${SDCARD}/${lib_dir}/mesa/${_gl}" || -L "${SDCARD}/${lib_dir}/${_gl}" ]]; then
+			run_host_command_logged mv -v "${SDCARD}/${lib_dir}/${_gl}" "${SDCARD}/${lib_dir}/${_gl}.mesa"
+		fi
+	done
+
 	chroot_sdcard ldconfig
 
 	return 0
@@ -318,14 +393,28 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 		"usr/include/rga/im2d.h" \
 		"usr/include/rknn/rknn_api.h" \
 		"${lib_dir}/dri/rockchip_drv_video.so" \
+		"${lib_dir}/libmali.so.1.9.0" \
 		"etc/udev/rules.d/60-rockchip-multimedia.rules" \
+		"etc/udev/rules.d/50-mali.rules" \
 		"etc/profile.d/rockchip-vaapi.sh"; do
 		if [[ ! -e "${SDCARD}/${f}" ]]; then
 			exit_with_error "rockchip-multimedia: expected file missing from rootfs: /${f}"
 		fi
 	done
 
-	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + GLES (Panfrost) + VA-API backend installed" "info"
+	# libEGL/libGLESv2 must resolve to the blob, not Mesa, or GL is software.
+	for _gl in libEGL.so.1 libGLESv2.so.2; do
+		if [[ ! -L "${SDCARD}/${lib_dir}/${_gl}" ]]; then
+			exit_with_error "rockchip-multimedia: /${lib_dir}/${_gl} is not a symlink to libmali"
+		fi
+		local _target
+		_target="$(readlink -f "${SDCARD}/${lib_dir}/${_gl}")"
+		if [[ "${_target}" != *libmali* ]]; then
+			exit_with_error "rockchip-multimedia: ${_gl} -> ${_target} (expected libmali blob)"
+		fi
+	done
+
+	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + libmali G52 GLES + VA-API backend installed" "info"
 	display_alert "rockchip-multimedia" "on-device checks: vainfo, mpi_dec_test, glmark2-es2; firefox about:support should show HW decode" "info"
 	return 0
 }
