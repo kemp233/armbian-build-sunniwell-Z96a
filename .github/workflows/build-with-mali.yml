@@ -202,8 +202,8 @@ jobs:
           PLATFORM="${{ inputs.mali_platform }}"
           TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
           
-          # Create package directory structure
-          DEB_DIR="../mali-debs"
+          # Create package directory structure - use absolute path to workspace
+          DEB_DIR="${GITHUB_WORKSPACE}/mali-debs"
           mkdir -p "$DEB_DIR"
           
           # Build the runtime package
@@ -264,7 +264,7 @@ jobs:
         run: |
           ARTIFACT_NAME=libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
           mkdir -p artifacts/${ARTIFACT_NAME}
-          cp ../mali-debs/*.deb artifacts/${ARTIFACT_NAME}/
+          cp mali-debs/*.deb artifacts/${ARTIFACT_NAME}/
           find libmali-rockchip/build -name "*.so*" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
           find libmali-rockchip/build -name "*.pc" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
           find artifacts/${ARTIFACT_NAME} -type f | sort > artifacts/${ARTIFACT_NAME}/MANIFEST.txt
