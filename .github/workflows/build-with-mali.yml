@@ -63,12 +63,10 @@ jobs:
       - name: Fix arm64 apt sources (GitHub Actions uses ports.ubuntu.com for arm64)
         run: |
           sudo dpkg --add-architecture arm64
-          cat > /etc/apt/sources.list.d/arm64-ports.list <<'EOF'
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse
-          EOF
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
           # Disable arm64 from main repos (causes 404)
           sudo sed -i '/security.ubuntu.com.*arm64/d' /etc/apt/sources.list 2>/dev/null || true
           sudo sed -i '/azure.archive.ubuntu.com.*arm64/d' /etc/apt/sources.list 2>/dev/null || true
