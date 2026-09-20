@@ -352,8 +352,10 @@ jobs:
 
       - name: Setup Armbian version
         run: |
-          cat os/stable.json | jq '.version' | sed 's/"//g' | sed 's/^/ARMBIAN_VERSION=/' >> $GITHUB_ENV
-          echo "ARMBIAN_VERSION=${{ env.ARMBIAN_VERSION }}-mali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-$(date +%Y%m%d)" >> $GITHUB_ENV
+          BASE_VERSION=$(cat os/stable.json | jq -r '.version')
+          FULL_VERSION="${BASE_VERSION}-mali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-$(date +%Y%m%d)"
+          echo "ARMBIAN_VERSION=${FULL_VERSION}" >> $GITHUB_ENV
+          echo "Using ARMBIAN_VERSION: ${FULL_VERSION}"
 
       - name: Apply custom config & patches
         run: |
