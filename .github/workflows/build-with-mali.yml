@@ -97,14 +97,14 @@ jobs:
         run: |
           echo "=== PKG_CONFIG_PATH ==="
           echo $PKG_CONFIG_PATH
-          echo "=== Checking /usr/aarch64-linux-gnu/lib/pkgconfig ==="
-          ls -la /usr/aarch64-linux-gnu/lib/pkgconfig/ 2>/dev/null | head -20
+          echo "=== Checking /usr/lib/aarch64-linux-gnu/pkgconfig ==="
+          ls -la /usr/lib/aarch64-linux-gnu/pkgconfig/ 2>/dev/null | head -20
           echo "=== Checking drm.pc ==="
-          cat /usr/aarch64-linux-gnu/lib/pkgconfig/drm.pc 2>/dev/null || echo "NOT FOUND"
+          cat /usr/lib/aarch64-linux-gnu/pkgconfig/drm.pc 2>/dev/null || echo "NOT FOUND"
           echo "=== Testing pkg-config libdrm ==="
-          PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig pkg-config --cflags --libs libdrm 2>&1 || echo "FAILED"
+          PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config --cflags --libs libdrm 2>&1 || echo "FAILED"
           echo "=== Testing pkg-config gbm ==="
-          PKG_CONFIG_PATH=/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig pkg-config --cflags --libs gbm 2>&1 || echo "FAILED"
+          PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config --cflags --libs gbm 2>&1 || echo "FAILED"
           echo "=== Finding drm.pc ==="
           find /usr -name "drm.pc" -o -name "gbm.pc" -o -name "wayland*.pc" -o -name "xcb*.pc" 2>/dev/null | head -20
           echo "=== dpkg -L libdrm-dev:arm64 ==="
@@ -134,14 +134,14 @@ jobs:
 
           [properties]
           sys_root = '/usr/aarch64-linux-gnu'
-          pkg_config_path = '/usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig'
+          pkg_config_path = '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
           EOF
 
       - name: Configure Meson
         working-directory: libmali-rockchip
         env:
-          PKG_CONFIG_PATH: /usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig
-          PKG_CONFIG_LIBDIR: /usr/aarch64-linux-gnu/lib/pkgconfig:/usr/aarch64-linux-gnu/share/pkgconfig
+          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
         run: |
           meson setup build \
             --cross-file ../cross.txt \
