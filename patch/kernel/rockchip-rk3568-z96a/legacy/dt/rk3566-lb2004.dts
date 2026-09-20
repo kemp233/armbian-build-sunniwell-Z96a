@@ -942,7 +942,10 @@
 &rknpu {
 	/* rknpu-supply per original Android DTB = vdd_npu (RK809 DCDC_REG4) */
 	rknpu-supply = <&vdd_npu>;
-	memory-region = <&rknpu_mem>;
+	/* No memory-region here: the NPU allocates from the separate
+	 * "rk-dma-heap-cma" pool whose size is set by the
+	 * rk_dma_heap_cma=768M kernel command line parameter (see
+	 * boot-lb2004-rk3566.cmd), not from a DT reserved-memory node. */
 	status = "okay";
 };
 #endif
