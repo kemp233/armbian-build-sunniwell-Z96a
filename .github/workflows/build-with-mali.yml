@@ -64,291 +64,212 @@ jobs:
         run: |
           sudo dpkg --add-architecture arm64
           # Add arm64 repos from ports.ubuntu.com
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
-          # Restrict ALL deb822 stanzas (main + security) to amd64 - arm64 causes 404
-          # awk inserts "Architectures: amd64" after every "Types:" line (one per stanza)
-          if [ -f /etc/apt/sources.list.d/ubuntu.sources ]; then
-            sudo awk 'BEGIN{FS=OFS="\n"} /^Types:/ {print; print "Architectures: amd64"; next} /Architectures:/ {next} {print}' /etc/apt/sources.list.d/ubuntu.sources | sudo tee /etc/apt/sources.list.d/ubuntu.sources.new > /dev/null
-            sudo mv /etc/apt/sources.list.d/ubuntu.sources.new /etc/apt/sources.list.d/ubuntu.sources
-          fi
-          # Also handle classic sources.list if present
-          if [ -f /etc/apt/sources.list ] && [ -s /etc/apt/sources.list ]; then
-            sudo sed -i 's|^deb http://azure.archive.ubuntu.com|deb [arch=amd64] http://azure.archive.ubuntu.com|g' /etc/apt/sources.list
-            sudo sed -i 's|^deb http://security.ubuntu.com|deb [arch=amd64] http://security.ubuntu.com|g' /etc/apt/sources.list
-            sudo sed -i 's|^deb-src http://azure.archive.ubuntu.com|deb-src [arch=amd64] http://azure.archive.ubuntu.com|g' /etc/apt/sources.list
-            sudo sed -i 's|^deb-src http://security.ubuntu.com|deb-src [arch=amd64] http://security.ubuntu.com|g' /etc/apt/sources.list
-          fi
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble-updates.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble-security.list
           sudo apt-get update
 
       - name: Install cross-compilation toolchain & deps
         run: |
+          sudo apt-get update
           sudo apt-get install -y \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            pkg-config-aarch64-linux-gnu \
             libdrm-dev:arm64 libgbm-dev:arm64 libwayland-dev:arm64 \
-            libxcb1-dev:arm64 libx11-dev:arm64 libx11-xcb-dev:arm64 \
-            libxdamage-dev:arm64 libxext-dev:arm64 libxfixes-dev:arm64 \
-            libxau-dev:arm64 libxdmcp-dev:arm64 libffi-dev:arm64 libssl-dev:arm64 \
-            pkg-config meson ninja-build
+            libx11-dev:arm64 libxext-dev:arm64 libxdamage-dev:arm64 libxcb-dri2-0-dev:arm64 \
+            meson ninja-build python3 python3-pip
 
       - name: Install native build dependencies (for dpkg-buildpackage)
         run: |
-          # dpkg-buildpackage -aarm64 checks build deps for arm64 arch, so install arm64 versions
+          sudo apt-get update
           sudo apt-get install -y \
-            build-essential debhelper \
-            libxcb-dri2-0:arm64 libx11-xcb1:arm64 libxdamage1:arm64 libxext6:arm64 libwayland-client0:arm64
+            build-essential debhelper dh-make \
+            libdrm-dev libgbm-dev libwayland-dev \
+            libx11-dev libxext-dev libxdamage-dev libxcb-dri2-0-dev \
+            pkg-config meson ninja-build
 
       - name: Verify pkg-config for cross-compile
         run: |
-          echo "=== PKG_CONFIG_PATH ==="
-          echo $PKG_CONFIG_PATH
-          echo "=== Checking /usr/lib/aarch64-linux-gnu/pkgconfig ==="
-          ls -la /usr/lib/aarch64-linux-gnu/pkgconfig/ 2>/dev/null | head -20
-          echo "=== Checking drm.pc ==="
-          cat /usr/lib/aarch64-linux-gnu/pkgconfig/drm.pc 2>/dev/null || echo "NOT FOUND"
-          echo "=== Testing pkg-config libdrm ==="
-          PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config --cflags --libs libdrm 2>&1 || echo "FAILED"
-          echo "=== Testing pkg-config gbm ==="
-          PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig pkg-config --cflags --libs gbm 2>&1 || echo "FAILED"
-          echo "=== Finding drm.pc ==="
-          find /usr -name "drm.pc" -o -name "gbm.pc" -o -name "wayland*.pc" -o -name "xcb*.pc" 2>/dev/null | head -20
-          echo "=== dpkg -L libdrm-dev:arm64 ==="
-          dpkg -L libdrm-dev:arm64 2>/dev/null | grep -E "\.pc$|pkgconfig" | head -10
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+          pkg-config --modversion libdrm
+          pkg-config --modversion gbm
+          pkg-config --modversion wayland-client
 
       - name: Create cross file
         run: |
-          cat > cross.txt <<'EOF'
+          cat > cross_file.txt << 'EOF'
           [binaries]
-          c = '/usr/bin/aarch64-linux-gnu-gcc'
-          cpp = '/usr/bin/aarch64-linux-gnu-g++'
-          ar = '/usr/bin/aarch64-linux-gnu-gcc-ar'
-          strip = '/usr/bin/aarch64-linux-gnu-strip'
-          pkgconfig = '/usr/bin/pkg-config'
+          c = 'aarch64-linux-gnu-gcc'
+          cpp = 'aarch64-linux-gnu-g++'
+          ar = 'aarch64-linux-gnu-gcc-ar'
+          strip = 'aarch64-linux-gnu-strip'
+          pkgconfig = 'aarch64-linux-gnu-pkg-config'
 
           [host_machine]
           system = 'linux'
           cpu_family = 'aarch64'
-          cpu = 'aarch64'
-          endian = 'little'
-
-          [build_machine]
-          system = 'linux'
-          cpu_family = 'x86_64'
-          cpu = 'x86_64'
+          cpu = 'cortex-a55'
           endian = 'little'
 
           [properties]
-          # arm64 headers are at /usr/include (not /usr/aarch64-linux-gnu/usr/include)
-          # sys_root = '/usr/aarch64-linux-gnu'  # Commented out - causes wrong include paths
-          pkg_config_path = '/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig'
+          sys_root = '/'
+          pkg_config_libdir = '/usr/lib/aarch64-linux-gnu/pkgconfig'
           EOF
 
       - name: Configure Meson
-        working-directory: libmali-rockchip
-        env:
-          PKG_CONFIG_PATH: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          PKG_CONFIG_LIBDIR: /usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
-          # arm64 headers are in standard locations, not under sysroot
-          C_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
-          CPLUS_INCLUDE_PATH: /usr/include:/usr/include/aarch64-linux-gnu
         run: |
-          meson setup build \
-            --cross-file ../cross.txt \
-            -Darch=aarch64 \
-            -Dgpu=${{ inputs.mali_gpu }} \
-            -Dversion=${{ inputs.mali_version }} \
-            -Dsubversion=none \
-            -Dplatform=${{ inputs.mali_platform }} \
-            -Dopencl-icd=false \
-            -Dhooks=true \
-            -Dwrappers=enabled \
-            -Doptimize-level=O3 \
-            -Dprefix=/usr \
-            -Dlibdir=lib/aarch64-linux-gnu \
-            -Dbuildtype=release \
-            -Ddefault_library=shared
-
-      - name: Build with Ninja
-        working-directory: libmali-rockchip
-        run: |
-          ninja -C build -v
-
-      - name: Verify build artifacts
-        working-directory: libmali-rockchip
-        run: |
-          echo "=== Shared libraries ==="
-          find build -name "*.so*" -type f | xargs -r ls -la
-          echo "=== pkg-config files ==="
-          find build -name "*.pc" -type f | xargs -r ls -la
-
-      - name: Create Debian packages manually (skip debian/rules meson re-run)
-        working-directory: libmali-rockchip
-        run: |
-          set -e
-          echo "=== Creating Debian packages from pre-built artifacts ==="
-          
-          # Get package info from debian/changelog
-          VERSION=$(dpkg-parsechangelog -S Version | head -1)
-          PACKAGE=$(dpkg-parsechangelog -S Source | head -1)
-          ARCH="arm64"
-          
-          echo "Package: $PACKAGE, Version: $VERSION, Arch: $ARCH"
-          
-          # Determine target name from inputs
           GPU="${{ inputs.mali_gpu }}"
           VER="${{ inputs.mali_version }}"
           PLATFORM="${{ inputs.mali_platform }}"
           TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
           
-          # Create package directory structure - use absolute path to workspace
-          DEB_DIR="${GITHUB_WORKSPACE}/mali-debs"
-          mkdir -p "$DEB_DIR"
-          
-          # Build the runtime package
-          PKG_NAME="libmali-${TARGET_NAME}"
-          PKG_DIR="${DEB_DIR}/${PKG_NAME}_${VERSION}_${ARCH}"
-          mkdir -p "${PKG_DIR}/DEBIAN"
-          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
-          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig"
-          
-          # Copy shared libraries from our build
-          echo "Copying shared libraries..."
-          cp -a build/libmali.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/libEGL.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/libGLESv1_CM.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/libGLESv2.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/libgbm.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/libOpenCL.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          cp -a build/hook/libmali-hook.so* "${PKG_DIR}/usr/lib/aarch64-linux-gnu/"
-          
-          # Copy pkg-config files
-          echo "Copying pkg-config files..."
-          cp -a build/meson-private/*.pc "${PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
-          
-          # Create control file for runtime package
-          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: libc6 (>= 2.17), libdrm2 (>= 2.4.75), libgbm1 (>= 20.0), libwayland-client0 (>= 1.18), libx11-xcb1, libxcb-dri2-0, libxdamage1, libxext6\nDescription: Mali GPU User-Space Binary Drivers (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the shared libraries.\n' \
-            "${PKG_NAME}" "${VERSION}" "${ARCH}" "${TARGET_NAME}" > "${PKG_DIR}/DEBIAN/control"
-          
-          # Build the dev package
-          DEV_PKG_NAME="libmali-${TARGET_NAME}-dev"
-          DEV_PKG_DIR="${DEB_DIR}/${DEV_PKG_NAME}_${VERSION}_${ARCH}"
-          mkdir -p "${DEV_PKG_DIR}/DEBIAN"
-          mkdir -p "${DEV_PKG_DIR}/usr/include"
-          mkdir -p "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu"
-          mkdir -p "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig"
-          
-          # Copy headers if they exist
-          if [ -d "include" ]; then
-            cp -a include/* "${DEV_PKG_DIR}/usr/include/"
-          fi
-          
-          # Copy pkg-config files
-          cp -a build/meson-private/*.pc "${DEV_PKG_DIR}/usr/lib/aarch64-linux-gnu/pkgconfig/"
-          
-          # Create control file for dev package
-          printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: Putin Lee <putin.li@rock-chips.com>\nDepends: %s (= %s)\nDescription: Mali GPU User-Space Binary Drivers - Development files (%s)\n Mali GPU proprietary drivers for Bifrost G52.\n This package contains the development headers and pkg-config files.\n' \
-            "${DEV_PKG_NAME}" "${VERSION}" "${ARCH}" "${PKG_NAME}" "${VERSION}" "${TARGET_NAME}" > "${DEV_PKG_DIR}/DEBIAN/control"
-          
-          # Build the .deb packages
-          echo "Building .deb packages..."
-          dpkg-deb --build "${PKG_DIR}" "${DEB_DIR}/"
-          dpkg-deb --build "${DEV_PKG_DIR}" "${DEB_DIR}/"
-          
-          # List created packages
-          ls -la "${DEB_DIR}/"
+          cd libmali-rockchip
+          meson setup build --cross-file ../cross_file.txt \
+            -Dgpu=${GPU} \
+            -Dversion=${VER} \
+            -Dplatform=${PLATFORM} \
+            -Dhooks=true \
+            --prefix=/usr
 
-      - name: Package artifacts for Armbian job
+      - name: Build with Ninja
+        run: |
+          cd libmali-rockchip
+          ninja -C build
+
+      - name: Verify build artifacts
+        run: |
+          cd libmali-rockchip
+          ls -la build/libmali.so* build/hook/libmali-hook.so* 2>/dev/null || true
+
+      - name: Create Debian packages manually (skip debian/rules meson re-run)
         id: package
         run: |
-          ARTIFACT_NAME=libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
-          mkdir -p artifacts/${ARTIFACT_NAME}
-          cp mali-debs/*.deb artifacts/${ARTIFACT_NAME}/
-          find libmali-rockchip/build -name "*.so*" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
-          find libmali-rockchip/build -name "*.pc" -type f -exec cp -a {} artifacts/${ARTIFACT_NAME}/ \;
-          find artifacts/${ARTIFACT_NAME} -type f | sort > artifacts/${ARTIFACT_NAME}/MANIFEST.txt
-          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
-          echo "=== Artifact contents ==="
-          ls -la artifacts/${ARTIFACT_NAME}/
+          GPU="${{ inputs.mali_gpu }}"
+          VER="${{ inputs.mali_version }}"
+          PLATFORM="${{ inputs.mali_platform }}"
+          TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
+          
+          PKG_VERSION="1.0-1"
+          PKG_NAME="libmali-${TARGET_NAME}"
+          DEV_PKG_NAME="libmali-${TARGET_NAME}-dev"
+          DEB_DIR="${GITHUB_WORKSPACE}/mali-debs"
+          
+          mkdir -p "${DEB_DIR}/${PKG_NAME}/DEBIAN"
+          mkdir -p "${DEB_DIR}/${PKG_NAME}/usr/lib/aarch64-linux-gnu"
+          mkdir -p "${DEB_DIR}/${DEV_PKG_NAME}/DEBIAN"
+          mkdir -p "${DEB_DIR}/${DEV_PKG_NAME}/usr/lib/aarch64-linux-gnu"
+          mkdir -p "${DEB_DIR}/${DEV_PKG_NAME}/usr/include"
+          
+          # Copy runtime libraries
+          cp -a libmali-rockchip/build/libmali.so* "${DEB_DIR}/${PKG_NAME}/usr/lib/aarch64-linux-gnu/"
+          cp -a libmali-rockchip/build/hook/libmali-hook.so* "${DEB_DIR}/${PKG_NAME}/usr/lib/aarch64-linux-gnu/"
+          
+          # Copy dev files
+          cp -a libmali-rockchip/build/libmali.so* "${DEB_DIR}/${DEV_PKG_NAME}/usr/lib/aarch64-linux-gnu/"
+          cp -a libmali-rockchip/build/hook/libmali-hook.so* "${DEB_DIR}/${DEV_PKG_NAME}/usr/lib/aarch64-linux-gnu/"
+          # Copy headers if they exist
+          find libmali-rockchip/include -name "*.h" -exec cp {} "${DEB_DIR}/${DEV_PKG_NAME}/usr/include/" \; 2>/dev/null || true
+          
+          # Create control file for runtime package
+          cat > "${DEB_DIR}/${PKG_NAME}/DEBIAN/control" << EOF
+          Package: ${PKG_NAME}
+          Version: ${PKG_VERSION}
+          Architecture: arm64
+          Maintainer: Putin Lee <putin.li@rock-chips.com>
+          Depends: libc6 (>= 2.17), libdrm2 (>= 2.4.75), libgbm1 (>= 20.0), libwayland-client0 (>= 1.18), libx11-xcb1, libxcb-dri2-0, libxdamage1, libxext6
+          Description: Mali GPU User-Space Binary Drivers (${TARGET_NAME})
+           Mali GPU proprietary drivers for Bifrost G52.
+           This package contains the shared libraries.
+          EOF
+          
+          # Create control file for dev package
+          cat > "${DEB_DIR}/${DEV_PKG_NAME}/DEBIAN/control" << EOF
+          Package: ${DEV_PKG_NAME}
+          Version: ${PKG_VERSION}
+          Architecture: arm64
+          Maintainer: Putin Lee <putin.li@rock-chips.com>
+          Depends: ${PKG_NAME} (= ${PKG_VERSION})
+          Description: Mali GPU User-Space Binary Drivers - Development files (${TARGET_NAME})
+           Mali GPU proprietary drivers for Bifrost G52.
+           This package contains the development headers and libraries.
+          EOF
+          
+          # Build packages
+          dpkg-deb --build "${DEB_DIR}/${PKG_NAME}" "${DEB_DIR}/${PKG_NAME}_${PKG_VERSION}_arm64.deb"
+          dpkg-deb --build "${DEB_DIR}/${DEV_PKG_NAME}" "${DEB_DIR}/${DEV_PKG_NAME}_${PKG_VERSION}_arm64.deb"
+          
+          echo "artifact-name=mali-debs" >> $GITHUB_OUTPUT
+
+      - name: Package artifacts for Armbian job
+        run: |
+          mkdir -p mali-artifacts
+          cp mali-debs/*.deb mali-artifacts/
+          # Also copy the install script template
+          cp -r mali-debs mali-artifacts/
 
       - name: Upload Mali artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package.outputs.artifact-name }}
-          path: artifacts/
+          name: libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
+          path: mali-artifacts/
           retention-days: 7
 
-  # 2. Build Armbian image with Mali packages
+  # 2. Build Armbian image with Mali
   build-armbian:
     name: Build Armbian Image (Z96A)
     needs: build-mali
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
+      - name: Set up job
+        uses: actions/checkout@v4
+
       - name: Checkout Armbian build repo
         uses: actions/checkout@v4
         with:
-          repository: kemp233/armbian-build-sunniwell-Z96a
-          token: ${{ secrets.GITHUB_TOKEN }}
+          repository: armbian/build
+          path: os
+          ref: ${{ github.event.inputs.armbian_branch }}
 
       - name: Download Mali artifacts
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build-mali.outputs.artifact-name }}
+          name: libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
           path: mali-artifacts
 
       - name: Prepare Mali packages for Armbian build
         run: |
-          set -e
-          echo "=== Mali artifacts downloaded ==="
-          ls -la mali-artifacts/
+          # Copy Mali debs to a location accessible during build
           mkdir -p mali-repo
-          find mali-artifacts -name "*.deb" -type f -exec cp {} mali-repo/ \;
-          cd mali-repo
-          apt-ftparchive packages . > Packages
-          gzip -c Packages > Packages.gz
-          cd ..
+          cp mali-artifacts/*.deb mali-repo/
           echo "MALI_REPO_PATH=$(pwd)/mali-repo" >> $GITHUB_ENV
 
       - name: Free disk space
-        uses: descriptinc/free-disk-space@main
+        uses: jlumbroso/free-disk-space@v1.3.1
         with:
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: true
-          docker-images: true
-          swap-storage: true
+          tool-cache: false
+          android: false
+          dotnet: false
+          haskell: false
+          large-packages: false
+          docker-images: false
+          swap: false
 
       - name: Import GPG key (if provided)
-        if: ${{ env.ARMBIAN_PGP_KEY != '' }}
-        uses: crazy-max/ghaction-import-gpg@v6
-        with:
-          gpg_private_key: ${{ secrets.ARMBIAN_PGP_KEY }}
-          passphrase: ${{ secrets.ARMBIAN_PGP_PASSWORD }}
+        if: ${{ secrets.GPG_PRIVATE_KEY != '' }}
+        run: |
+          echo "${{ secrets.GPG_PRIVATE_KEY }}" | gpg --import
+          echo "${{ secrets.GPG_PASSPHRASE }}" | gpg --passphrase-fd 0 --batch --yes --pinentry-mode loopback --export-secret-keys > /tmp/gpg.key
 
       - name: Clone Armbian OS & Build framework
         run: |
-          git clone --depth=1 https://github.com/armbian/os.git os
-          git clone --depth=1 https://github.com/momokind/armbian-build.git build
+          cd os
+          git submodule update --init --recursive
 
       - name: Prepare customisations
         run: |
-          mkdir -p custom
-          for dir in config patch packages extensions blobs; do
-            if [[ -d "$dir" ]]; then
-              cp -r "$dir" custom/
-            fi
-          done
-          [[ -d userpatches ]] && cp -r userpatches custom/
-          
-          mkdir -p custom/lib/functions/rootfs
-          for lib_file in rootfs/rootfs-create.sh rootfs/apt-install.sh; do
-            if [[ -f "lib/functions/${lib_file}" ]]; then
-              cp -v "lib/functions/${lib_file}" "custom/lib/functions/${lib_file}"
-            fi
-          done
+          rsync -av /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/custom/ os/custom/
+          rsync -av /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/extensions/ os/extensions/ 2>/dev/null || true
 
       - name: Setup Armbian version
         run: |
@@ -382,6 +303,37 @@ jobs:
           # Create install script using printf (avoids heredoc YAML issues)
           printf '#!/bin/bash\nset -e\necho "=== [Mali G52] Installing proprietary GPU drivers ==="\n\necho "deb [trusted=yes] file:/packages/extras-buildpkgs/mali-g52-g24p0 ./" > /etc/apt/sources.list.d/mali-local.list\napt-get update\n\nDEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \\\n  libmali-bifrost-g52-g24p0-gbm \\\n  libmali-bifrost-g52-g24p0-gbm-dev 2>/dev/null || true\n\necho "=== [Mali G52] Verifying installation ==="\nls -la /usr/lib/aarch64-linux-gnu/libmali* /usr/lib/aarch64-linux-gnu/libEGL* /usr/lib/aarch64-linux-gnu/libGLESv2* /usr/lib/aarch64-linux-gnu/libgbm* 2>/dev/null || true\n\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/libEGL.so.1 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/libGLESv2.so.2 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/libgbm.so.1 100 2>/dev/null || true\n\necho "/usr/lib/aarch64-linux-gnu" > /etc/ld.so.conf.d/mali.conf\nldconfig\n\ngroupadd -f video\ngroupadd -f render\n\necho "=== [Mali G52] Installation complete ==="\n' > build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
           chmod +x build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
+
+      - name: Install Mali packages via hook (pre-customize)
+        run: |
+          # Run the Mali install script in the rootfs chroot BEFORE the main build
+          # This ensures Mali is available when rockchip-multimedia extension runs
+          cd build
+          
+          # Create a temporary customize script that runs install-mali.sh
+          cat > userpatches/customize-image.sh << 'CUSTOMIZE_EOF'
+          #!/bin/bash
+          set -e
+          
+          echo "=== [Pre-customize] Installing Mali packages ==="
+          
+          # Copy the install script to the rootfs
+          cp /packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh /tmp/install-mali.sh
+          chmod +x /tmp/install-mali.sh
+          
+          # Run it in the chroot
+          chroot / /tmp/install-mali.sh
+          
+          # Verify
+          ls -la /usr/lib/aarch64-linux-gnu/libmali* /usr/lib/aarch64-linux-gnu/libEGL* /usr/lib/aarch64-linux-gnu/libGLESv2* /usr/lib/aarch64-linux-gnu/libgbm* 2>/dev/null || true
+          
+          echo "=== [Pre-customize] Mali installation complete ==="
+          CUSTOMIZE_EOF
+          
+          chmod +x userpatches/customize-image.sh
+          
+          # Set CUSTOMIZE_IMAGE to run our script
+          export CUSTOMIZE_IMAGE="userpatches/customize-image.sh"
 
       - name: Build Armbian image
         run: |
@@ -466,3 +418,4 @@ jobs:
             build/output/debug/
             build/*.log
           retention-days: 7
+
