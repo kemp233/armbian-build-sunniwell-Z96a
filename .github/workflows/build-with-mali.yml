@@ -101,7 +101,7 @@ jobs:
         run: |
           sudo apt-get install -y \
             crossbuild-essential-arm64 \
-            pkg-config-aarch64-linux-gnu \
+            pkg-config \
             libdrm-dev:arm64 \
             libgbm-dev:arm64 \
             libwayland-dev:arm64 \
