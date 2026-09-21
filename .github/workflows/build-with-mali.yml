@@ -178,7 +178,7 @@ jobs:
             --prefix=/usr \
             --libdir=lib/aarch64-linux-gnu \
             -Dplatform=gbm \
-            -Dbuild=release \
+            
             -Dwerror=false
 
       - name: Build with Ninja
