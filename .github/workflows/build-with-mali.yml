@@ -291,6 +291,16 @@ jobs:
           path: mali-artifacts-output/*.deb
           retention-days: 7
 
+      # Upload custom/ and extensions/ for use in Armbian build job
+      - name: Upload custom files
+        uses: actions/upload-artifact@v4
+        with:
+          name: armbian-custom
+          path: |
+            custom/
+            extensions/
+          retention-days: 7
+
   # 2. Build Armbian image with Mali packages
   build-armbian:
     name: Build Armbian Image (Z96A)
@@ -312,11 +322,23 @@ jobs:
           path: os
           ref: ${{ github.event.inputs.armbian_branch }}
 
+      - name: Checkout our repo for custom files
+        uses: actions/checkout@v4
+        with:
+          path: our-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download Mali artifacts
         uses: actions/download-artifact@v4
         with:
           name: libmali-${{ inputs.mali_gpu }}-${{ inputs.mali_version }}-${{ inputs.mali_platform }}-aarch64
           path: mali-artifacts
+
+      - name: Download custom files
+        uses: actions/download-artifact@v4
+        with:
+          name: armbian-custom
+          path: armbian-custom
 
       - name: Prepare Mali packages for Armbian build
         run: |
@@ -324,6 +346,17 @@ jobs:
           mkdir -p mali-repo
           cp mali-artifacts/*.deb mali-repo/
           echo "MALI_REPO_PATH=$(pwd)/mali-repo" >> $GITHUB_ENV
+
+      - name: Prepare customisations
+        run: |
+          # Copy custom files from our repo
+          rsync -av our-repo/custom/ custom/
+          rsync -av our-repo/extensions/ extensions/ 2>/dev/null || true
+          # Also copy from downloaded artifacts (backup)
+          rsync -av armbian-custom/custom/ custom/ 2>/dev/null || true
+          rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
+          ls -la custom/
+          ls -la extensions/ 2>/dev/null || true
 
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -346,11 +379,6 @@ jobs:
         run: |
           cd os
           git submodule update --init --recursive
-
-      - name: Prepare customisations
-        run: |
-          rsync -av /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/custom/ custom/
-          rsync -av /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/extensions/ extensions/ 2>/dev/null || true
 
       - name: Setup Armbian version
         run: |
