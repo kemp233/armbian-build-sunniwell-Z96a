@@ -37,14 +37,33 @@ mkdir -p "${work_dir}/src" "${work_dir}/build" "${work_dir}/stage"
 prefix="/usr"
 lib_dir="usr/lib/aarch64-linux-gnu"
 
-# Source: armbian build framework functions
-source /armbian/lib/functions/general/extensions.sh
-source /armbian/lib/functions/general/apt.sh
-source /armbian/lib/functions/general/files.sh
-source /armbian/lib/functions/general/utils.sh
+# Source: armbian build framework functions.
+# NOTE: these are sourced lazily inside hooks (see _rmm_source_framework)
+# because the extension file itself is sourced by the build framework on
+# the HOST during docker_cli_prepare_dockerfile, where the /armbian
+# bind-mount does not exist yet.  Any function that needs framework
+# helpers calls _rmm_source_framework first.
+function _rmm_source_framework() {
+	if [[ -n "${_RMM_FRAMEWORK_SOURCED:-}" ]]; then
+		return 0
+	fi
+	local fw_dir="${SRC:-/armbian}/lib/functions/general"
+	for f in extensions.sh apt.sh files.sh utils.sh; do
+		if [[ -f "${fw_dir}/${f}" ]]; then
+			# shellcheck disable=SC1090
+			source "${fw_dir}/${f}"
+		else
+			display_alert "rockchip-multimedia: framework file not found: ${fw_dir}/${f}" "extension" "err"
+			return 1
+		fi
+	done
+	_RMM_FRAMEWORK_SOURCED=1
+}
 
 # ============================================================ Packages --
 function post_family_config__rockchip_multimedia_gles_packages() {
+	_rmm_source_framework || return 1
+
 	# Mali G52 provides EGL/GLES3.2/OpenCL via debs installed by workflow
 	# libegl1, libgles2 are provided by Mali deb (libmali-bifrost-g52-g24p0-gbm)
 	# libgl1-mesa-dri provides GLX/swrast for X11 fallback
@@ -235,6 +254,8 @@ function _rockchip_multimedia_ensure_mali_symlinks() {
 
 # ============================================================ Main install --
 function pre_customize_image__rockchip_multimedia_install() {
+	_rmm_source_framework || return 1
+
 	[[ "${BOARDFAMILY:-}" != "rockchip-rk3568-z96a" ]] && return 0
 
 	display_alert "rockchip-multimedia" "installing MPP + librga + RKNN + VA-API + ensuring Mali G52" "info"
@@ -265,6 +286,8 @@ function pre_customize_image__rockchip_multimedia_install() {
 
 # ============================================================ Verification --
 function pre_umount_final_image__rockchip_multimedia_verify() {
+	_rmm_source_framework || return 1
+
 	[[ "${BOARDFAMILY:-}" != "rockchip-rk3568-z96a" ]] && return 0
 
 	local lib_dir="usr/lib/aarch64-linux-gnu"
