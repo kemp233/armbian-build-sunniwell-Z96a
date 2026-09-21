@@ -6,36 +6,52 @@
 set -e
 
 # Cross-compile environment
-export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
-export CROSS_COMPILE="aarch64-linux-gnu-"
-export CC="aarch64-linux-gnu-gcc"
-export CXX="aarch64-linux-gnu-g++"
-export STRIP="aarch64-linux-gnu-strip"
+function _rmm_setup_cross_compile() {
+	export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+	export CROSS_COMPILE="aarch64-linux-gnu-"
+	export CC="aarch64-linux-gnu-gcc"
+	export CXX="aarch64-linux-gnu-g++"
+	export STRIP="aarch64-linux-gnu-strip"
+}
 
 # Pinned versions
-EXT_MPP_GIT="https://github.com/rockchip-linux/mpp.git"
-EXT_MPP_REF="f8b8a3a7f7c2c5e8e8c6e0f6b8a3c5d8e9f0a1b2"  # mpp 1.5.0-ish
-EXT_RGA_GIT="https://github.com/rockchip-linux/librga.git"
-EXT_RGA_REF="v2.1.0"
-EXT_RKNN_GIT="https://github.com/rockchip-linux/rknn-toolkit2.git"
-EXT_RKNN_REF="v2.3.0"
-EXT_VADRV_GIT="https://github.com/rockchip-linux/libva-rkmpp.git"
-EXT_VADRV_REF="v1.0.0"
+function _rmm_pinned_versions() {
+	EXT_MPP_GIT="https://github.com/rockchip-linux/mpp.git"
+	EXT_MPP_REF="f8b8a3a7f7c2c5e8e8c6e0f6b8a3c5d8e9f0a1b2"  # mpp 1.5.0-ish
+	EXT_RGA_GIT="https://github.com/rockchip-linux/librga.git"
+	EXT_RGA_REF="v2.1.0"
+	EXT_RKNN_GIT="https://github.com/rockchip-linux/rknn-toolkit2.git"
+	EXT_RKNN_REF="v2.3.0"
+	EXT_VADRV_GIT="https://github.com/rockchip-linux/libva-rkmpp.git"
+	EXT_VADRV_REF="v1.0.0"
 
-# Mali-G52 (Bifrost, CSF) - INSTALLED VIA DEBS FROM WORKFLOW
-# The workflow cross-compiles libmali and creates debs that are installed via install-mali.sh
-# This extension only ensures the symlinks point to the Mali blob, not Mesa.
-declare -g EXT_LIBMALI_GIT="https://github.com/tsukumijima/libmali-rockchip.git"
-declare -g EXT_LIBMALI_REF="g52-g24p0-gbm"
-declare -g EXT_LIBMALI_PLATFORM="gbm"
+	# Mali-G52 (Bifrost, CSF) - INSTALLED VIA DEBS FROM WORKFLOW
+	# The workflow cross-compiles libmali and creates debs that are installed via install-mali.sh
+	# This extension only ensures the symlinks point to the Mali blob, not Mesa.
+	declare -g EXT_LIBMALI_GIT="https://github.com/tsukumijima/libmali-rockchip.git"
+	declare -g EXT_LIBMALI_REF="g52-g24p0-gbm"
+	declare -g EXT_LIBMALI_PLATFORM="gbm"
+}
 
 # Work directory
-work_dir="${1:-/tmp/rockchip-multimedia}"
-mkdir -p "${work_dir}/src" "${work_dir}/build" "${work_dir}/stage"
+function _rmm_setup_work_dir() {
+	local work_dir="${1:-/tmp/rockchip-multimedia}"
+	mkdir -p "${work_dir}/src" "${work_dir}/build" "${work_dir}/stage"
+}
 
 # System paths
-prefix="/usr"
-lib_dir="usr/lib/aarch64-linux-gnu"
+function _rmm_system_paths() {
+	prefix="/usr"
+	lib_dir="usr/lib/aarch64-linux-gnu"
+}
+
+# Initialize all top-level state (called by hooks)
+function _rmm_init() {
+	_rmm_setup_cross_compile
+	_rmm_pinned_versions
+	_rmm_setup_work_dir
+	_rmm_system_paths
+}
 
 # Source: armbian build framework functions.
 # NOTE: these are sourced lazily inside hooks (see _rmm_source_framework)
@@ -63,6 +79,7 @@ function _rmm_source_framework() {
 # ============================================================ Packages --
 function post_family_config__rockchip_multimedia_gles_packages() {
 	_rmm_source_framework || return 1
+	_rmm_init
 
 	# Mali G52 provides EGL/GLES3.2/OpenCL via debs installed by workflow
 	# libegl1, libgles2 are provided by Mali deb (libmali-bifrost-g52-g24p0-gbm)
@@ -82,222 +99,191 @@ function _rockchip_multimedia_fetch_pinned() {
 		git checkout FETCH_HEAD 2>/dev/null || git checkout "${git_ref}" 2>/dev/null || true
 	else
 		git clone --depth 1 --branch "${git_ref}" "${git_url}" "${dst_dir}" 2>/dev/null || \
-		git clone --depth 1 "${git_url}" "${dst_dir}" && cd "${dst_dir}" && git checkout "${git_ref}" 2>/dev/null || true
+		git clone --depth 1 "${git_url}" "${dst_dir}" && cd "${dst_dir}"
 	fi
 }
 
 function _rockchip_multimedia_build_mpp() {
+	_rmm_init
 	local src_dir="${work_dir}/src/mpp"
 	local build_dir="${work_dir}/build/mpp"
-	local stage_dir="${work_dir}/stage"
-	
+	local stage_dir="${work_dir}/stage/mpp"
+
 	_rockchip_multimedia_fetch_pinned "${EXT_MPP_GIT}" "${EXT_MPP_REF}" "${src_dir}"
-	
-	rm -rf "${build_dir}"
+
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
-	
 	cmake "${src_dir}" \
 		-DCMAKE_INSTALL_PREFIX="${prefix}" \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DBUILD_SHARED_LIBS=ON \
-		-DMPP_BUILD_TESTS=OFF \
-		-DMPP_BUILD_STATIC=OFF \
-		-DMPP_CODEC_H264=ON \
-		-DMPP_CODEC_H265=ON \
-		-DMPP_CODEC_VP9=ON \
-		-DMPP_CODEC_AVS2=ON \
-		-DMPP_CODEC_MJPEG=ON
-	
-	make -j$(nproc)
-	make DESTDIR="${stage_dir}" install
+		-DBUILD_TESTS=OFF \
+		-DBUILD_STATIC=OFF \
+		-DCMAKE_C_COMPILER="${CC}" \
+		-DCMAKE_CXX_COMPILER="${CXX}" \
+		-DCMAKE_STRIP="${STRIP}" \
+		-DCMAKE_CROSSCOMPILING=ON \
+		-DCMAKE_SYSTEM_NAME=Linux \
+		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+		-DCMAKE_SYSROOT="${SDCARD}" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+
+	make -j"$(nproc)"
+	DESTDIR="${stage_dir}" make install
+	rsync -av "${stage_dir}/" "${SDCARD}/"
 }
 
 # ============================================================ librga --
 function _rockchip_multimedia_build_rga() {
+	_rmm_init
 	local src_dir="${work_dir}/src/librga"
 	local build_dir="${work_dir}/build/librga"
-	local stage_dir="${work_dir}/stage"
-	
+	local stage_dir="${work_dir}/stage/librga"
+
 	_rockchip_multimedia_fetch_pinned "${EXT_RGA_GIT}" "${EXT_RGA_REF}" "${src_dir}"
-	
-	rm -rf "${build_dir}"
+
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
-	
 	cmake "${src_dir}" \
 		-DCMAKE_INSTALL_PREFIX="${prefix}" \
 		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTS=OFF \
 		-DBUILD_SHARED_LIBS=ON \
-		-DBUILD_TEST=OFF
-	
-	make -j$(nproc)
-	make DESTDIR="${stage_dir}" install
+		-DCMAKE_C_COMPILER="${CC}" \
+		-DCMAKE_CXX_COMPILER="${CXX}" \
+		-DCMAKE_STRIP="${STRIP}" \
+		-DCMAKE_CROSSCOMPILING=ON \
+		-DCMAKE_SYSTEM_NAME=Linux \
+		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+		-DCMAKE_SYSROOT="${SDCARD}" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+
+	make -j"$(nproc)"
+	DESTDIR="${stage_dir}" make install
+	rsync -av "${stage_dir}/" "${SDCARD}/"
 }
 
 # ============================================================ RKNN --
-function _rockchip_multimedia_fetch_rknn() {
-	local src_dir="${work_dir}/src/rknn"
-	
+function _rockchip_multimedia_build_rknn() {
+	_rmm_init
+	local src_dir="${work_dir}/src/rknn-toolkit2"
+	local stage_dir="${work_dir}/stage/rknn"
+
 	_rockchip_multimedia_fetch_pinned "${EXT_RKNN_GIT}" "${EXT_RKNN_REF}" "${src_dir}"
-	
-	# Copy prebuilt libraries
-	local stage_dir="${work_dir}/stage"
-	mkdir -p "${stage_dir}/${lib_dir}"
-	mkdir -p "${stage_dir}/usr/include"
-	
-	# RKNN runtime libraries
-	cp -a "${src_dir}/rknpu2/runtime/Linux/librknn_api/aarch64/"* "${stage_dir}/${lib_dir}/" 2>/dev/null || true
-	cp -a "${src_dir}/rknpu2/runtime/Linux/librknnrt/"* "${stage_dir}/${lib_dir}/" 2>/dev/null || true
-	
-	# Headers
-	cp -a "${src_dir}/rknpu2/runtime/Linux/librknn_api/include/"* "${stage_dir}/usr/include/" 2>/dev/null || true
+
+	# RKNN toolkit2 provides prebuilt libs in rknn-toolkit2/rknpu2/runtime/Linux/lib64/
+	local prebuilt_dir="${src_dir}/rknpu2/runtime/Linux/lib64"
+	if [[ -d "${prebuilt_dir}" ]]; then
+		mkdir -p "${stage_dir}/${lib_dir}"
+		cp -av "${prebuilt_dir}/"*.so* "${stage_dir}/${lib_dir}/"
+		rsync -av "${stage_dir}/" "${SDCARD}/"
+	else
+		display_alert "rockchip-multimedia" "RKNN prebuilt libs not found at ${prebuilt_dir}" "warn"
+	fi
 }
 
-# ============================================================ VA-API (libva-rkmpp) --
-function _rockchip_multimedia_build_va_rkmpp() {
+# ============================================================ VA-API --
+function _rockchip_multimedia_build_vaapi() {
+	_rmm_init
 	local src_dir="${work_dir}/src/libva-rkmpp"
 	local build_dir="${work_dir}/build/libva-rkmpp"
-	local stage_dir="${work_dir}/stage"
-	local va_sysroot="${stage_dir}"
-	
-	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}"
-	
-	# libva-dev headers for compilation
-	mkdir -p "${va_sysroot}/usr/include/va"
-	cp -a "${src_dir}/libva/va" "${va_sysroot}/usr/include/"
-	sed -e 's/@VA_API_MAJOR_VERSION@/1/' \
-		-e 's/@VA_API_MINOR_VERSION@/17/' \
-		-e 's/@VA_API_MICRO_VERSION@/0/' \
-		-e 's/@VA_API_VERSION@/1.17.0/' \
-		"${src_dir}/libva/va/va_version.h.in" > "${va_sysroot}/usr/include/va/va_version.h"
-	
-	cat > "${va_sysroot}/usr/lib/aarch64-linux-gnu/pkgconfig/libva.pc" <<- EOT
-		prefix=/usr
-		exec_prefix=\${prefix}
-		libdir=\${prefix}/lib/aarch64-linux-gnu
-		includedir=\${prefix}/include
-		driverdir=\${prefix}/lib/aarch64-linux-gnu/dri
+	local stage_dir="${work_dir}/stage/libva-rkmpp"
 
-		Name: libva
-		Description: Userspace Video Acceleration (VA) core interface
-		Version: 1.17.0
-		Libs: -L\${libdir} -lva
-		Cflags: -I\${includedir}
-	EOT
-	
-	rm -rf "${build_dir}"
+	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}"
+
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
-	
-	PKG_CONFIG_PATH="${va_sysroot}/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/lib/aarch64-linux-gnu/pkgconfig" \
-	./autogen.sh \
-		--prefix="${prefix}" \
-		--libdir="${prefix}/lib/aarch64-linux-gnu" \
-		--disable-static \
-		--enable-shared \
-		--with-drm \
-		--with-glx=no \
-		--with-wayland=no \
-		--with-x11=no \
-		--host=aarch64-linux-gnu \
-		--build=x86_64-pc-linux-gnu \
-		CFLAGS="-I${va_sysroot}/usr/include" \
-		LDFLAGS="-L${va_sysroot}/usr/lib/aarch64-linux-gnu"
-	
-	make -j$(nproc)
-	make DESTDIR="${stage_dir}" install
-	
-	# VA-API driver profile
-	mkdir -p "${stage_dir}/etc/profile.d"
-	cat > "${stage_dir}/etc/profile.d/rockchip-vaapi.sh" <<- 'EOF'
-		export LIBVA_DRIVER_NAME=rkmpp
-		export LIBVA_DRIVERS_PATH=/usr/lib/aarch64-linux-gnu/dri
-		export MPP_BUFFERS_TYPE=ion
-	EOF
+	cmake "${src_dir}" \
+		-DCMAKE_INSTALL_PREFIX="${prefix}" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DBUILD_TESTS=OFF \
+		-DCMAKE_C_COMPILER="${CC}" \
+		-DCMAKE_CXX_COMPILER="${CXX}" \
+		-DCMAKE_STRIP="${STRIP}" \
+		-DCMAKE_CROSSCOMPILING=ON \
+		-DCMAKE_SYSTEM_NAME=Linux \
+		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+		-DCMAKE_SYSROOT="${SDCARD}" \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+
+	make -j"$(nproc)"
+	DESTDIR="${stage_dir}" make install
+	rsync -av "${stage_dir}/" "${SDCARD}/"
 }
 
-# ============================================================ Mali G52 (from debs) --
-# Mali is installed via the workflow's install-mali.sh (run via customize-image.sh hook)
-# This function only ensures symlinks point to Mali wrappers, not Mesa
-function _rockchip_multimedia_ensure_mali_symlinks() {
-	local stage_dir="${work_dir}/stage"
-	
-	display_alert "rockchip-multimedia" "ensuring Mali G52 GLES symlinks point to libmali blob" "info"
-	
-	# The Mali blob is libmali.so.1.9.0. The wrapper libraries (libEGL.so.1,
-	# libGLESv2.so.2, libgbm.so.1, libOpenCL.so.1) are trampolines that dlopen
-	# libmali. Ensure they're properly symlinked.
-	chroot_sdcard sh -c '
-		set -e
-		lib_dir="/usr/lib/aarch64-linux-gnu"
-		# Ensure the Mali blob exists
-		if [[ ! -e "${lib_dir}/libmali.so.1.9.0" ]]; then
-			echo "ERROR: libmali.so.1.9.0 not found in ${lib_dir}" >&2
-			exit 1
-		fi
-		# Create/update symlinks to point to Mali wrappers (not Mesa)
-		# The Mali deb installs libEGL.so.1, libGLESv2.so.2, libgbm.so.1, libOpenCL.so.1
-		# as wrapper libraries that dlopen libmali.so.1.9.0
-		for lib in libEGL.so.1 libGLESv2.so.2 libgbm.so.1 libOpenCL.so.1; do
-			# If the file exists and is not a symlink, or points to mesa, fix it
-			if [[ -e "${lib_dir}/${lib}" && ! -L "${lib_dir}/${lib}" ]]; then
-				echo "WARNING: ${lib_dir}/${lib} is a regular file, replacing with Mali wrapper symlink" >&2
-				rm -f "${lib_dir}/${lib}"
-			fi
-			# The Mali wrappers should already be installed by the deb package
-			# Ensure they point to the right target
-		done
-		ldconfig
-	'
-}
-
-# ============================================================ Main install --
-function pre_customize_image__rockchip_multimedia_install() {
+# ============================================================ Hooks --
+function pre_debootstrap__rockchip_multimedia_install() {
 	_rmm_source_framework || return 1
+	_rmm_init
 
-	[[ "${BOARDFAMILY:-}" != "rockchip-rk3568-z96a" ]] && return 0
+	display_alert "rockchip-multimedia" "installing MPP + librga + RKNN + VA-API backend (Mali G52 via debs)" "info"
 
-	display_alert "rockchip-multimedia" "installing MPP + librga + RKNN + VA-API + ensuring Mali G52" "info"
-	
-	# Build MPP
 	_rockchip_multimedia_build_mpp
-	
-	# Build librga
 	_rockchip_multimedia_build_rga
-	
-	# Fetch RKNN prebuilts
-	_rockchip_multimedia_fetch_rknn
-	
-	# Build VA-API driver
-	_rockchip_multimedia_build_va_rkmpp
-	
-	# Copy staged files to rootfs
-	display_alert "rockchip-multimedia" "copying staged userspace into rootfs" "info"
-	run_host_command_logged cp -av "${work_dir}/stage/." "${SDCARD}/"
-	
-	# Ensure Mali symlinks point to Mali blob (not Mesa)
-	_rockchip_multimedia_ensure_mali_symlinks
-	
-	chroot_sdcard ldconfig
-	
-	return 0
+	_rockchip_multimedia_build_rknn
+	_rockchip_multimedia_build_vaapi
+
+	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
 
-# ============================================================ Verification --
+function customize_image__rockchip_multimedia_mali_symlinks() {
+	_rmm_source_framework || return 1
+	_rmm_init
+
+	display_alert "rockchip-multimedia" "setting up Mali G52 EGL/GLES/GBM/OpenCL symlinks" "info"
+
+	# Ensure Mali symlinks point to libmali wrapper, not Mesa
+	# These are installed by the workflow's install-mali.sh via pre-customize hook
+	local SDCARD="${SDCARD:-/}"
+
+	# libEGL
+	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libEGL.so.1"
+	ln -sf libEGL.so.1 "${SDCARD}/${lib_dir}/libEGL.so"
+
+	# libGLESv2
+	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libGLESv2.so.2"
+	ln -sf libGLESv2.so.2 "${SDCARD}/${lib_dir}/libGLESv2.so"
+
+	# libgbm
+	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libgbm.so.1"
+	ln -sf libgbm.so.1 "${SDCARD}/${lib_dir}/libgbm.so"
+
+	# libOpenCL
+	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libOpenCL.so.1"
+	ln -sf libOpenCL.so.1 "${SDCARD}/${lib_dir}/libOpenCL.so"
+
+	# VA-API driver path
+	mkdir -p "${SDCARD}/etc/profile.d"
+	cat > "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" << 'EOF'
+export LIBVA_DRIVER_NAME=rkmpp
+export LIBVA_DRIVERS_PATH=/usr/lib/aarch64-linux-gnu/dri
+EOF
+
+	display_alert "rockchip-multimedia" "Mali G52 symlinks configured" "info"
+}
+
 function pre_umount_final_image__rockchip_multimedia_verify() {
 	_rmm_source_framework || return 1
+	_rmm_init
 
-	[[ "${BOARDFAMILY:-}" != "rockchip-rk3568-z96a" ]] && return 0
+	display_alert "rockchip-multimedia" "verifying installation on rootfs" "info"
 
-	local lib_dir="usr/lib/aarch64-linux-gnu"
-	local f
+	local SDCARD="${SDCARD:-/}"
+
+	# Check core libraries
 	for f in \
-		"${lib_dir}/librockchip_mpp.so.1" \
+		"${lib_dir}/libmpp.so" \
 		"${lib_dir}/librga.so" \
+		"${lib_dir}/librknn_api.so" \
 		"${lib_dir}/librknnrt.so" \
-		"${lib_dir}/pkgconfig/rockchip_mpp.pc" \
-		"${lib_dir}/pkgconfig/librga.pc" \
 		"${lib_dir}/dri/rkmpp_drv_video.so" \
 		"etc/profile.d/rockchip-vaapi.sh"; do
 		if [[ ! -e "${SDCARD}/${f}" ]]; then
