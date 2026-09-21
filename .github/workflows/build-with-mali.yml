@@ -65,7 +65,7 @@ jobs:
           sudo dpkg --add-architecture arm64
           # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
           # Replace it entirely with ports.ubuntu.com for arm64
-          cat > /etc/apt/sources.list.d/ubuntu.sources << 'EOF'
+          cat << 'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu.sources
           Types: deb
           URIs: http://ports.ubuntu.com/ubuntu-ports
           Suites: noble noble-updates noble-security noble-backports
