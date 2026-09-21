@@ -57,12 +57,14 @@ function _rmm_init() {
 # NOTE: these are sourced lazily inside hooks (see _rmm_source_framework)
 # because the extension file itself is sourced by the build framework on
 # the HOST during docker_cli_prepare_dockerfile, where the /armbian
-# bind-mount does not exist yet.  Any function that needs framework
-# helpers calls _rmm_source_framework first.
+# bind-mount does not exist yet. At that point, SRC points to the build
+# repo on the host. Inside the container, /armbian is the bind mount.
+# Any function that needs framework helpers calls _rmm_source_framework first.
 function _rmm_source_framework() {
 	if [[ -n "${_RMM_FRAMEWORK_SOURCED:-}" ]]; then
 		return 0
 	fi
+	# Use SRC (set by compile.sh) on host, /armbian inside container
 	local fw_dir="${SRC:-/armbian}/lib/functions/general"
 	for f in extensions.sh apt.sh files.sh utils.sh; do
 		if [[ -f "${fw_dir}/${f}" ]]; then
