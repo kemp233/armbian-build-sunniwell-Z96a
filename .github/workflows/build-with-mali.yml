@@ -60,14 +60,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           path: libmali-rockchip
 
-      - name: Fix arm64 apt sources (GitHub Actions uses ports.ubuntu.com for arm64)
+      - name: Add arm64 apt sources (GitHub Actions uses ports.ubuntu.com for arm64)
         run: |
           sudo dpkg --add-architecture arm64
           # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
-          # Replace it entirely with ports.ubuntu.com for arm64 ONLY
+          # Append arm64 repositories from ports.ubuntu.com (keep existing amd64 repos)
           # Remove duplicate .list files
           sudo rm -f /etc/apt/sources.list.d/ports-*.list
-          cat << 'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu.sources
+          cat << 'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu-ports.sources
           Types: deb
           URIs: http://ports.ubuntu.com/ubuntu-ports
           Suites: noble noble-updates noble-security noble-backports
