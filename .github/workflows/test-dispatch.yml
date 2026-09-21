@@ -1,0 +1,15 @@
+name: Test Workflow Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_input:
+        description: 'Test input'
+        type: string
+        default: 'hello'
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Test input: ${{ inputs.test_input }}"
