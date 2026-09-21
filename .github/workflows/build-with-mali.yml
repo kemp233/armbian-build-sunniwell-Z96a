@@ -319,7 +319,7 @@ jobs:
           [[ -d custom/extensions ]] && rsync -av custom/extensions/. os/build/extensions/
           rm -fv os/build/patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
 
-- name: Inject Mali repo & install hook
+      - name: Inject Mali repo & install hook
         run: |
           mkdir -p os/build/packages/extras-buildpkgs/mali-g52-g24p0
           cp -r ${{ env.MALI_REPO_PATH }}/* os/build/packages/extras-buildpkgs/mali-g52-g24p0/
