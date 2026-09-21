@@ -60,13 +60,26 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           path: libmali-rockchip
 
-      - name: Add arm64 apt sources (GitHub Actions uses ports.ubuntu.com for arm64)
+      - name: Configure apt sources for cross-compilation (amd64 host + arm64 target)
         run: |
           sudo dpkg --add-architecture arm64
           # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
-          # Append arm64 repositories from ports.ubuntu.com (keep existing amd64 repos)
+          # Fix the default sources to only serve amd64 (security.ubuntu.com doesn't serve arm64)
+          # Then add arm64 repositories from ports.ubuntu.com
           # Remove duplicate .list files
           sudo rm -f /etc/apt/sources.list.d/ports-*.list
+          
+          # Fix default ubuntu.sources to only serve amd64
+          cat << 'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu.sources
+          Types: deb
+          URIs: http://azure.archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates noble-security noble-backports
+          Components: main restricted universe multiverse
+          Architectures: amd64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
+          
+          # Add arm64 repositories from ports.ubuntu.com
           cat << 'EOF' | sudo tee /etc/apt/sources.list.d/ubuntu-ports.sources
           Types: deb
           URIs: http://ports.ubuntu.com/ubuntu-ports
