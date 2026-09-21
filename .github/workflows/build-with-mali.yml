@@ -187,8 +187,17 @@ jobs:
       - name: Verify build artifacts
         working-directory: libmali-rockchip
         run: |
-          ls -la builddir/src/
-          find builddir -name "*.so*" -type f | head -20
+          echo "=== Build directory contents ==="
+          ls -la builddir/
+          echo "=== All .so files ==="
+          find builddir -name "*.so*" -type f | head -30
+          # Check for libMali.so (the main library we need)
+          if [ -f builddir/libMali.so ] || [ -f builddir/libmali.so.1.9.0 ]; then
+            echo "Found Mali libraries in builddir/"
+          else
+            echo "ERROR: Mali libraries not found!"
+            exit 1
+          fi
 
       - name: Create Debian packages manually (skip debian/rules meson re-run)
         id: package
@@ -209,9 +218,21 @@ jobs:
           mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl"
           mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm"
           
-          # Copy built libraries
-          cp builddir/src/libMali.so "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/"
-          cp builddir/src/libMali.so "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/"
+          # Copy built libraries - they're in builddir/ not builddir/src/
+          LIBMALI_SRC=""
+          if [ -f builddir/libMali.so ]; then
+            LIBMALI_SRC="builddir/libMali.so"
+          elif [ -f builddir/libmali.so.1.9.0 ]; then
+            LIBMALI_SRC="builddir/libmali.so.1.9.0"
+          else
+            echo "ERROR: Cannot find libMali.so"
+            find builddir -name "*.so*" -type f
+            exit 1
+          fi
+          
+          echo "Using library: ${LIBMALI_SRC}"
+          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/libMali.so"
+          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/libMali.so"
           
           # Create symlinks
           cd "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
