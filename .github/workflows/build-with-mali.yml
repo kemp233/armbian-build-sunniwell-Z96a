@@ -204,7 +204,7 @@ jobs:
         working-directory: libmali-rockchip
         run: |
           set -e
-          VERSION="${{ inputs.mali_version }}-gbm"
+          VERSION="1.${{ inputs.mali_version }}-gbm"
           GPU="${{ inputs.mali_gpu }}"
           PLATFORM="${{ inputs.mali_platform }}"
           
