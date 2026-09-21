@@ -63,8 +63,10 @@ jobs:
       - name: Fix arm64 apt sources (GitHub Actions uses ports.ubuntu.com for arm64)
         run: |
           sudo dpkg --add-architecture arm64
-          # Remove all security.ubuntu.com entries (no arm64 packages)
-          sudo sed -i '/security.ubuntu.com/d' /etc/apt/sources.list
+          # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
+          # Disable security.ubuntu.com repos (no arm64 packages)
+          sudo sed -i 's|^URIs:.*security.ubuntu.com|# URIs: http://ports.ubuntu.com/ubuntu-ports|' /etc/apt/sources.list.d/ubuntu.sources
+          sudo sed -i 's|^Suites:.*security|Suites: noble-security|' /etc/apt/sources.list.d/ubuntu.sources
           # Add arm64 repos from ports.ubuntu.com
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble.list
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble-updates.list
