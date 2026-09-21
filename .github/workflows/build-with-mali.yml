@@ -63,9 +63,6 @@ jobs:
       - name: Configure apt sources for cross-compilation (amd64 host + arm64 target)
         run: |
           sudo dpkg --add-architecture arm64
-          # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
-          # Fix the default sources to only serve amd64 (security.ubuntu.com doesn
-          # serve arm64) and add arm64 sources explicitly
           sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null << 'SOURCES'
           Types: deb
           URIs: http://archive.ubuntu.com/ubuntu/
@@ -156,7 +153,7 @@ jobs:
           cpp = 'aarch64-linux-gnu-g++'
           ar = 'aarch64-linux-gnu-ar'
           strip = 'aarch64-linux-gnu-strip'
-          pkgconfig = 'aarch64-linux-gnu-pkg-config'
+          pkgconfig = 'pkg-config'
 
           [host_machine]
           system = 'linux'
@@ -165,24 +162,25 @@ jobs:
           endian = 'little'
 
           [properties]
-          c_args = ['-fPIC']
-          c_link_args = ['-fPIC']
+          sys_root = '/'
           CROSS
           cat /tmp/cross-file.txt
 
       - name: Configure Meson
         working-directory: libmali-rockchip
+        env:
+          PKG_CONFIG_PATH: "/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
         run: |
-          export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
           meson setup builddir --cross-file /tmp/cross-file.txt \
             --prefix=/usr \
             --libdir=lib/aarch64-linux-gnu \
             -Dplatform=gbm \
-            
             -Dwerror=false
 
       - name: Build with Ninja
         working-directory: libmali-rockchip
+        env:
+          PKG_CONFIG_PATH: "/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
         run: |
           ninja -C builddir
 
