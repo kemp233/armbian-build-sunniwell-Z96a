@@ -66,7 +66,7 @@ if test "${devtype}" = "mmc"; then part uuid mmc ${devnum}:${distro_bootpart} pa
 # defaults to only 32MB (RK_DMA_HEAP_CMA_DEFAULT_SIZE). Sense-voice INT8 is
 # 253MB and fails with ENOMEM unless we override the pool size here.
 # The linux,cma DT node is a *different* pool and is NOT used by rknpu.
-setenv extraargs "rk_dma_heap_cma=768M"
+setenv extraargs "rk_dma_heap_cma=1024M"
 
 setenv bootargs "root=${rootdev} rootwait rootfstype=${rootfstype} ${consoleargs} consoleblank=0 loglevel=${verbosity} ubootpart=${partuuid} usb-storage.quirks=${usbstoragequirks} ${extraargs} ${extraboardargs}"
 
