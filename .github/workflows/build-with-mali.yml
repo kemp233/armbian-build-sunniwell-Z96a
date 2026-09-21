@@ -303,36 +303,36 @@ jobs:
 
       - name: Apply custom config & patches
         run: |
-          # Create all necessary build subdirectories
-          mkdir -pv build/userpatches build/config/boards build/config/kernel build/config/bootenv build/config/bootscripts build/config/sources build/patch build/packages build/config/optional build/lib build/extensions
-          [[ -d os/userpatches ]] && rsync -av os/userpatches/. build/userpatches/
-          [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. build/userpatches/
-          [[ -d custom/config/boards ]] && rsync -av custom/config/boards/. build/config/boards/
-          [[ -d custom/config/kernel ]] && rsync -av custom/config/kernel/. build/config/kernel/
-          [[ -d custom/config/bootenv ]] && rsync -av custom/config/bootenv/. build/config/bootenv/
-          [[ -d custom/config/bootscripts ]] && rsync -av custom/config/bootscripts/. build/config/bootscripts/
-          [[ -d custom/config/sources ]] && rsync -av custom/config/sources/. build/config/sources/
-          [[ -d custom/patch ]] && rsync -av custom/patch/. build/patch/
-          [[ -d custom/packages ]] && rsync -av custom/packages/. build/packages/
-          [[ -d custom/config/optional ]] && rsync -av custom/config/optional/. build/config/optional/
-          [[ -d custom/lib ]] && rsync -av custom/lib/. build/lib/
-          [[ -d custom/extensions ]] && rsync -av custom/extensions/. build/extensions/
-          rm -fv build/patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+          # Create all necessary build subdirectories in os/ (where compile.sh runs)
+          mkdir -pv os/build/userpatches os/build/config/boards os/build/config/kernel os/build/config/bootenv os/build/config/bootscripts os/build/config/sources os/build/patch os/build/packages os/build/config/optional os/build/lib os/build/extensions
+          [[ -d os/userpatches ]] && rsync -av os/userpatches/. os/build/userpatches/
+          [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. os/build/userpatches/
+          [[ -d custom/config/boards ]] && rsync -av custom/config/boards/. os/build/config/boards/
+          [[ -d custom/config/kernel ]] && rsync -av custom/config/kernel/. os/build/config/kernel/
+          [[ -d custom/config/bootenv ]] && rsync -av custom/config/bootenv/. os/build/config/bootenv/
+          [[ -d custom/config/bootscripts ]] && rsync -av custom/config/bootscripts/. os/build/config/bootscripts/
+          [[ -d custom/config/sources ]] && rsync -av custom/config/sources/. os/build/config/sources/
+          [[ -d custom/patch ]] && rsync -av custom/patch/. os/build/patch/
+          [[ -d custom/packages ]] && rsync -av custom/packages/. os/build/packages/
+          [[ -d custom/config/optional ]] && rsync -av custom/config/optional/. os/build/config/optional/
+          [[ -d custom/lib ]] && rsync -av custom/lib/. os/build/lib/
+          [[ -d custom/extensions ]] && rsync -av custom/extensions/. os/build/extensions/
+          rm -fv os/build/patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
 
-      - name: Inject Mali repo & install hook
+- name: Inject Mali repo & install hook
         run: |
-          mkdir -p build/packages/extras-buildpkgs/mali-g52-g24p0
-          cp -r ${{ env.MALI_REPO_PATH }}/* build/packages/extras-buildpkgs/mali-g52-g24p0/
+          mkdir -p os/build/packages/extras-buildpkgs/mali-g52-g24p0
+          cp -r ${{ env.MALI_REPO_PATH }}/* os/build/packages/extras-buildpkgs/mali-g52-g24p0/
           
           # Create install script using printf (avoids heredoc YAML issues)
-          printf '#!/bin/bash\nset -e\necho "=== [Mali G52] Installing proprietary GPU drivers ==="\n\necho "deb [trusted=yes] file:/packages/extras-buildpkgs/mali-g52-g24p0 ./" > /etc/apt/sources.list.d/mali-local.list\napt-get update\n\nDEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \\\n  libmali-bifrost-g52-g24p0-gbm \\\n  libmali-bifrost-g52-g24p0-gbm-dev 2>/dev/null || true\n\necho "=== [Mali G52] Verifying installation ==="\nls -la /usr/lib/aarch64-linux-gnu/libmali* /usr/lib/aarch64-linux-gnu/libEGL* /usr/lib/aarch64-linux-gnu/libGLESv2* /usr/lib/aarch64-linux-gnu/libgbm* 2>/dev/null || true\n\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/libEGL.so.1 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/libGLESv2.so.2 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/libgbm.so.1 100 2>/dev/null || true\n\necho "/usr/lib/aarch64-linux-gnu" > /etc/ld.so.conf.d/mali.conf\nldconfig\n\ngroupadd -f video\ngroupadd -f render\n\necho "=== [Mali G52] Installation complete ==="\n' > build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
-          chmod +x build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
+          printf '#!/bin/bash\nset -e\necho "=== [Mali G52] Installing proprietary GPU drivers ==="\n\necho "deb [trusted=yes] file:/packages/extras-buildpkgs/mali-g52-g24p0 ./" > /etc/apt/sources.list.d/mali-local.list\napt-get update\n\nDEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades \\\n  libmali-bifrost-g52-g24p0-gbm \\\n  libmali-bifrost-g52-g24p0-gbm-dev 2>/dev/null || true\n\necho "=== [Mali G52] Verifying installation ==="\nls -la /usr/lib/aarch64-linux-gnu/libmali* /usr/lib/aarch64-linux-gnu/libEGL* /usr/lib/aarch64-linux-gnu/libGLESv2* /usr/lib/aarch64-linux-gnu/libgbm* 2>/dev/null || true\n\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/libEGL.so.1 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/libGLESv2.so.2 100 2>/dev/null || true\nupdate-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/libgbm.so.1 100 2>/dev/null || true\n\necho "/usr/lib/aarch64-linux-gnu" > /etc/ld.so.conf.d/mali.conf\nldconfig\n\ngroupadd -f video\ngroupadd -f render\necho "=== [Mali G52] Installation complete ==="\n' > os/build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
+          chmod +x os/build/packages/extras-buildpkgs/mali-g52-g24p0/install-mali.sh
 
       - name: Install Mali packages via hook (pre-customize)
         run: |
           # Run the Mali install script in the rootfs chroot BEFORE the main build
           # This ensures Mali is available when rockchip-multimedia extension runs
-          cd build
+          cd os/build
           
           # Create a temporary customize script that runs install-mali.sh
           cat > userpatches/customize-image.sh << 'CUSTOMIZE_EOF'
