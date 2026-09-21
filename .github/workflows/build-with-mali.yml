@@ -303,7 +303,8 @@ jobs:
 
       - name: Apply custom config & patches
         run: |
-          mkdir -pv build/userpatches
+          # Create all necessary build subdirectories
+          mkdir -pv build/userpatches build/config/boards build/config/kernel build/config/bootenv build/config/bootscripts build/config/sources build/patch build/packages build/config/optional build/lib build/extensions
           [[ -d os/userpatches ]] && rsync -av os/userpatches/. build/userpatches/
           [[ -d custom/userpatches ]] && rsync -av custom/userpatches/. build/userpatches/
           [[ -d custom/config/boards ]] && rsync -av custom/config/boards/. build/config/boards/
