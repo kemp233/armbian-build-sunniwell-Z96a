@@ -304,17 +304,18 @@ jobs:
       - name: Apply custom config & patches
         run: |
           # Create all necessary build subdirectories in os/ (where compile.sh runs)
-          mkdir -pv os/build/userpatches os/build/config/boards os/build/config/kernel os/build/config/bootenv os/build/config/bootscripts os/build/config/sources os/build/patch os/build/packages os/build/config/optional os/build/lib os/build/extensions
+          # Armbian looks for board configs in config/boards/ relative to os/
+          mkdir -pv os/build/userpatches os/config/boards os/config/kernel os/config/bootenv os/config/bootscripts os/config/sources os/build/patch os/build/packages os/config/optional os/build/lib os/build/extensions
           [[ -d os/userpatches ]] && rsync -av os/userpatches/. os/build/userpatches/
           [[ -d os/custom/userpatches ]] && rsync -av os/custom/userpatches/. os/build/userpatches/
-          [[ -d os/custom/config/boards ]] && rsync -av os/custom/config/boards/. os/build/config/boards/
-          [[ -d os/custom/config/kernel ]] && rsync -av os/custom/config/kernel/. os/build/config/kernel/
-          [[ -d os/custom/config/bootenv ]] && rsync -av os/custom/config/bootenv/. os/build/config/bootenv/
-          [[ -d os/custom/config/bootscripts ]] && rsync -av os/custom/config/bootscripts/. os/build/config/bootscripts/
-          [[ -d os/custom/config/sources ]] && rsync -av os/custom/config/sources/. os/build/config/sources/
+          [[ -d os/custom/config/boards ]] && rsync -av os/custom/config/boards/. os/config/boards/
+          [[ -d os/custom/config/kernel ]] && rsync -av os/custom/config/kernel/. os/config/kernel/
+          [[ -d os/custom/config/bootenv ]] && rsync -av os/custom/config/bootenv/. os/config/bootenv/
+          [[ -d os/custom/config/bootscripts ]] && rsync -av os/custom/config/bootscripts/. os/config/bootscripts/
+          [[ -d os/custom/config/sources ]] && rsync -av os/custom/config/sources/. os/config/sources/
           [[ -d os/custom/patch ]] && rsync -av os/custom/patch/. os/build/patch/
           [[ -d os/custom/packages ]] && rsync -av os/custom/packages/. os/build/packages/
-          [[ -d os/custom/config/optional ]] && rsync -av os/custom/config/optional/. os/build/config/optional/
+          [[ -d os/custom/config/optional ]] && rsync -av os/custom/config/optional/. os/config/optional/
           [[ -d os/custom/lib ]] && rsync -av os/custom/lib/. os/build/lib/
           [[ -d os/custom/extensions ]] && rsync -av os/custom/extensions/. os/build/extensions/
           rm -fv os/build/patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
