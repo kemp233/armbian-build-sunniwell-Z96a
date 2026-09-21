@@ -124,7 +124,8 @@ jobs:
           cpp = 'aarch64-linux-gnu-g++'
           ar = 'aarch64-linux-gnu-gcc-ar'
           strip = 'aarch64-linux-gnu-strip'
-          pkgconfig = 'aarch64-linux-gnu-pkg-config'
+          # Use system pkg-config with PKG_CONFIG_PATH for cross-compilation
+          pkg-config = 'pkg-config'
 
           [host_machine]
           system = 'linux'
@@ -145,6 +146,7 @@ jobs:
           TARGET_NAME="${GPU}-${VER}-${PLATFORM}"
           
           cd libmali-rockchip
+          export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           meson setup build --cross-file ../cross_file.txt \
             -Dgpu=${GPU} \
             -Dversion=${VER} \
