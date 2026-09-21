@@ -64,9 +64,15 @@ jobs:
         run: |
           sudo dpkg --add-architecture arm64
           # Ubuntu 24.04 uses deb822 format in /etc/apt/sources.list.d/ubuntu.sources
-          # Disable security.ubuntu.com repos (no arm64 packages)
-          sudo sed -i 's|^URIs:.*security.ubuntu.com|# URIs: http://ports.ubuntu.com/ubuntu-ports|' /etc/apt/sources.list.d/ubuntu.sources
-          sudo sed -i 's|^Suites:.*security|Suites: noble-security|' /etc/apt/sources.list.d/ubuntu.sources
+          # Replace it entirely with ports.ubuntu.com for arm64
+          cat > /etc/apt/sources.list.d/ubuntu.sources << 'EOF'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports
+          Suites: noble noble-updates noble-security noble-backports
+          Components: main restricted universe multiverse
+          Architectures: arm64 amd64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          EOF
           # Add arm64 repos from ports.ubuntu.com
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble.list
           echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/ports-noble-updates.list
