@@ -376,7 +376,6 @@ jobs:
           fi
 
           cd os
-          git checkout ${{ inputs.armbian_branch }}
 
           # Map armbian_target input to valid Armbian commands
           # "kernel" -> "kernel", "image" -> "build"
