@@ -234,20 +234,14 @@
 	 * PHY (MAE0621A-Q2C, id 0x7b744411) comes up with this mode; plain
 	 * "rgmii" left the id read as 0xffff4411 (PHY id1 unreadable). */
 	phy-mode = "rgmii-rxid";
-	/* clock direction: factory Android uses "input" (external 125M
-	 * oscillator feeds the RGMII ref clock). Revert to factory setting -
-	 * the earlier "output" experiment still failed to read the PHY id,
-	 * so the oscillator hypothesis was not the blocker. */
+	/* clock direction: MAE0621A runs off a 25MHz crystal next to the
+	 * chip and generates the 125M RGMII reference clock itself, so the
+	 * SoC must receive it (clock_in_out="input").  With "output" the
+	 * SoC drives gmac1_clkin against the PHY's output and the DMA
+	 * engine never clears reset ("Failed to reset the dma"). */
 	clock_in_out = "input";
 
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
-	/* Clock parents decoded from the working Debian LB2004 DTB:
-	 * assigned-clock-parents = <&cru 391> <&cru 197> =
-	 * SCLK_GMAC1_RGMII_SPEED, CLK_MAC1_2TOP.  CLK_MAC1_2TOP is the
-	 * internal PLL path and pairs with clock_in_out="input" (the
-	 * external 125M oscillator feeds gmac1_clkin separately); using
-	 * CLK_MAC1_OUT here was the output direction and reparent failed
-	 * with -22. */
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
 				 <&cru CLK_MAC1_2TOP>;
 	assigned-clock-rates = <125000000>, <125000000>;
