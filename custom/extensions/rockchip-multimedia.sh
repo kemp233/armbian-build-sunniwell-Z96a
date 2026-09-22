@@ -5,13 +5,36 @@
 
 set -e
 
-# Cross-compile environment
+# Cross-compile environment - detects native ARM64 vs cross-compile from x86_64
 function _rmm_setup_cross_compile() {
-	export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
-	export CROSS_COMPILE="aarch64-linux-gnu-"
-	export CC="aarch64-linux-gnu-gcc"
-	export CXX="aarch64-linux-gnu-g++"
-	export STRIP="aarch64-linux-gnu-strip"
+	# Source framework to get ARCH variable if available
+	_rmm_source_framework || true
+
+	# Determine if we're native ARM64 or cross-compiling
+	# Use dpkg-architecture to check if target ARCH matches host
+	local target_arch="${ARCH:-arm64}"
+	local host_arch
+	host_arch=$(dpkg --print-architecture 2>/dev/null || echo "unknown")
+
+	if dpkg-architecture -e "${target_arch}" 2>/dev/null; then
+		# Native ARM64 build (e.g., on ubuntu-24.04-arm runner)
+		display_alert "rockchip-multimedia" "Native ARM64 build detected (target=${target_arch}, host=${host_arch})" "info"
+		export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+		export CROSS_COMPILE=""
+		export CC="gcc"
+		export CXX="g++"
+		export STRIP="strip"
+		export _RMM_NATIVE_BUILD=1
+	else
+		# Cross-compilation from x86_64 to ARM64
+		display_alert "rockchip-multimedia" "Cross-compile build detected (target=${target_arch}, host=${host_arch})" "info"
+		export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+		export CROSS_COMPILE="aarch64-linux-gnu-"
+		export CC="aarch64-linux-gnu-gcc"
+		export CXX="aarch64-linux-gnu-g++"
+		export STRIP="aarch64-linux-gnu-strip"
+		export _RMM_NATIVE_BUILD=0
+	fi
 }
 
 # Pinned versions
@@ -115,6 +138,26 @@ function _rockchip_multimedia_build_mpp() {
 
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
+	
+	# Set cmake cross-compile flags based on native vs cross
+	local cmake_cross_flags=()
+	if [[ "${_RMM_NATIVE_BUILD:-0}" == "1" ]]; then
+		# Native build - no cross-compile flags needed
+		cmake_cross_flags=()
+	else
+		# Cross-compile build
+		cmake_cross_flags=(
+			-DCMAKE_CROSSCOMPILING=ON
+			-DCMAKE_SYSTEM_NAME=Linux
+			-DCMAKE_SYSTEM_PROCESSOR=aarch64
+			-DCMAKE_SYSROOT="${SDCARD}"
+			-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+			-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		)
+	fi
+
 	cmake "${src_dir}" \
 		-DCMAKE_INSTALL_PREFIX="${prefix}" \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -123,14 +166,7 @@ function _rockchip_multimedia_build_mpp() {
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
 		-DCMAKE_STRIP="${STRIP}" \
-		-DCMAKE_CROSSCOMPILING=ON \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-		-DCMAKE_SYSROOT="${SDCARD}" \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		"${cmake_cross_flags[@]}"
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
@@ -148,6 +184,23 @@ function _rockchip_multimedia_build_rga() {
 
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
+	
+	local cmake_cross_flags=()
+	if [[ "${_RMM_NATIVE_BUILD:-0}" == "1" ]]; then
+		cmake_cross_flags=()
+	else
+		cmake_cross_flags=(
+			-DCMAKE_CROSSCOMPILING=ON
+			-DCMAKE_SYSTEM_NAME=Linux
+			-DCMAKE_SYSTEM_PROCESSOR=aarch64
+			-DCMAKE_SYSROOT="${SDCARD}"
+			-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+			-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		)
+	fi
+
 	cmake "${src_dir}" \
 		-DCMAKE_INSTALL_PREFIX="${prefix}" \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -156,14 +209,7 @@ function _rockchip_multimedia_build_rga() {
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
 		-DCMAKE_STRIP="${STRIP}" \
-		-DCMAKE_CROSSCOMPILING=ON \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-		-DCMAKE_SYSROOT="${SDCARD}" \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		"${cmake_cross_flags[@]}"
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
@@ -200,6 +246,23 @@ function _rockchip_multimedia_build_vaapi() {
 
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
+	
+	local cmake_cross_flags=()
+	if [[ "${_RMM_NATIVE_BUILD:-0}" == "1" ]]; then
+		cmake_cross_flags=()
+	else
+		cmake_cross_flags=(
+			-DCMAKE_CROSSCOMPILING=ON
+			-DCMAKE_SYSTEM_NAME=Linux
+			-DCMAKE_SYSTEM_PROCESSOR=aarch64
+			-DCMAKE_SYSROOT="${SDCARD}"
+			-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
+			-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
+			-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		)
+	fi
+
 	cmake "${src_dir}" \
 		-DCMAKE_INSTALL_PREFIX="${prefix}" \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -207,14 +270,7 @@ function _rockchip_multimedia_build_vaapi() {
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
 		-DCMAKE_STRIP="${STRIP}" \
-		-DCMAKE_CROSSCOMPILING=ON \
-		-DCMAKE_SYSTEM_NAME=Linux \
-		-DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-		-DCMAKE_SYSROOT="${SDCARD}" \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
-		-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
-		-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
+		"${cmake_cross_flags[@]}"
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
