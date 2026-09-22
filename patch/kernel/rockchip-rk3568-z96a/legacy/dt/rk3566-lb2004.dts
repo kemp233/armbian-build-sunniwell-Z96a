@@ -367,17 +367,12 @@
 	status = "okay";
 };
 
-/* PAM8406 class-D amp enable - GPIO1_A4, ACTIVE_HIGH.  The rk817 codec
- * driver claims the line via spk-ctl-gpios but never raises it, so hog
- * it high here to keep the amp permanently enabled.  This pin must not
- * be muxed as i2s1 sclkrx (see &i2s1_8ch pinctrl override). */
+/* PAM8406 class-D amp enable - GPIO1_A4, ACTIVE_HIGH.  Now driven by the
+ * rk817 codec driver via spk-ctl-gpios (enabled only during playback).
+ * This pin must not be muxed as i2s1 sclkrx (see &i2s1_8ch pinctrl
+ * override). */
 &gpio1 {
-	amp_en {
-		gpio-hog;
-		gpios = <RK_PA4 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "pam8406-amp-en";
-	};
+	/delete-node/ amp_en;
 };
 
 /* HDMI / VOP display pipeline.  i2s0 feeds the internal dw-hdmi audio
@@ -469,10 +464,12 @@
 			 * pinctrl - the pinctrl subsystem applies the mux. */
 			pinctrl-names = "default";
 			pinctrl-0 = <&i2s1m0_mclk>;
-			/* PAM8406 amp enable (GPIO1_A4) is hogged high by
-			 * pinctrl instead - the codec driver's spk-ctl gpio
-			 * handling never raises the line. */
+			/* PAM8406 amp enable: the codec driver raises/lowers
+			 * GPIO1_A4 around playback (factory wiring, spk-ctl).
+			 * A permanent gpio-hog keeps the amp biased on all the
+			 * time and was a likely source of idle noise. */
 			use-ext-amplifier;
+			spk-ctl-gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
 			hp-volume = <20>;
 			spk-volume = <18>;
 			mic-in-differential;
