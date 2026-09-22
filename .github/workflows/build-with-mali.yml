@@ -299,6 +299,77 @@ jobs:
             our-repo/extensions/
           retention-days: 7
 
+      # 2. Build Armbian image with Mali packages
+  build-armbian:
+    name: Build Armbian Image (Z96A)
+    runs-on: ubuntu-24.04
+    needs: build-mali
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Armbian build framework
+        uses: actions/checkout@v4
+        with:
+          repository: momokind/armbian-build
+          path: .
+          ref: ${{ github.event.inputs.armbian_branch }}
+
+      - name: Checkout our repo for board config
+        uses: actions/checkout@v4
+        with:
+          repository: kemp233/armbian-build-sunniwell-Z96a
+          path: z96a-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Inject z96a-v2 board config
+        run: |
+          cp z96a-repo/config/boards/z96a-v2.conf config/boards/z96a-v2.conf
+          ls -la config/boards/z96a-v2.conf
+
+      - name: Inject custom configs (boot, kernel, patches, blobs)
+        run: |
+          # Copy custom boot scripts
+          mkdir -p config/bootscripts
+          cp z96a-repo/custom/config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd config/bootscripts/
+          
+          # Copy custom bootenv
+          mkdir -p config/bootenv
+          cp z96a-repo/custom/config/bootenv/boot-z96a-rk3568-laptop-v2.cmd config/bootenv/ 2>/dev/null || true
+          
+          # Copy custom kernel config
+          mkdir -p config/kernel
+          cp z96a-repo/custom/config/kernel/linux-rockchip-rk3568-z96a-legacy.config config/kernel/
+          
+          # Copy custom family config
+          mkdir -p config/sources/families
+          cp z96a-repo/custom/config/sources/families/rockchip-rk3568-z96a.conf config/sources/families/
+          
+          # Copy custom patches
+          mkdir -p patch/kernel/rockchip-rk3568-z96a/legacy/dt
+          cp -r z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/dt/*.dts patch/kernel/rockchip-rk3568-z96a/legacy/dt/ 2>/dev/null || true
+          cp z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/*.patch patch/kernel/rockchip-rk3568-z96a/legacy/ 2>/dev/null || true
+          
+          # Copy custom blobs
+          mkdir -p packages/blobs/rk35
+          cp z96a-repo/packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin packages/blobs/rk35/ 2>/dev/null || true
+          
+          # Copy custom optional packages (udev rules etc)
+          mkdir -p config/optional/boards
+          cp -r z96a-repo/custom/config/optional/boards/z96a-v2 config/optional/boards/ 2>/dev/null || true
+          
+          ls -la config/boards/z96a-v2.conf
+          ls -la config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd
+          ls -la config/kernel/linux-rockchip-rk3568-z96a-legacy.config
+          ls -la config/sources/families/rockchip-rk3568-z96a.conf
+          ls -la patch/kernel/rockchip-rk3568-z96a/legacy/dt/
+          ls -la packages/blobs/rk35/
+
+      - name: Checkout Armbian os repo (contains stable.json)
+        uses: actions/checkout@v4
+        with:
+          repository: armbian/os
+          path: os
+          ref: ${{ github.event.inputs.armbian_branch }}
+
   # 2. Build Armbian image with Mali packages
   build-armbian:
     name: Build Armbian Image (Z96A)
