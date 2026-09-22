@@ -418,7 +418,7 @@ jobs:
           MALI_REPO_PATH: ${{ env.MALI_REPO_PATH }}
         run: |
           ./compile.sh \
-            BOARD=sunniwell-z96a \
+            BOARD=z96a-v2 \
             BRANCH=${{ github.event.inputs.armbian_kernel_branch }} \
             RELEASE=${{ github.event.inputs.armbian_release }} \
             BUILD_DESKTOP=${{ github.event.inputs.armbian_ui }} \
