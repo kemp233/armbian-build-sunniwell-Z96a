@@ -301,10 +301,10 @@ jobs:
             our-repo/extensions/
           retention-days: 7
 
-  # 2. Build Armbian image with Mali packages
+  # 2. Build Armbian image with Mali packages (native ARM64 runner - no qemu needed)
   build-armbian:
     name: Build Armbian Image (Z96A)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     needs: build-mali
     timeout-minutes: 120
     steps:
@@ -415,14 +415,6 @@ jobs:
           large-packages: false
           docker-images: false
           swap: false
-
-      - name: Install qemu-user-static for ARM64 chroot
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-          # Verify binfmt is registered for ARM64
-          ls -la /proc/sys/fs/binfmt_misc/ | grep -i qemu || true
-          cat /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null || true
 
       - name: Import GPG key (if provided)
         if: env.GPG_PRIVATE_KEY != ''
