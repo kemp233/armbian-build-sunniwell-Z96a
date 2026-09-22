@@ -416,6 +416,14 @@ jobs:
           docker-images: false
           swap: false
 
+      - name: Install qemu-user-static for ARM64 chroot
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          # Verify binfmt is registered for ARM64
+          ls -la /proc/sys/fs/binfmt_misc/ | grep -i qemu || true
+          cat /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null || true
+
       - name: Import GPG key (if provided)
         if: env.GPG_PRIVATE_KEY != ''
         run: |
