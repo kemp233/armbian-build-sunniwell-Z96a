@@ -66,7 +66,7 @@ function _rmm_source_framework() {
 	fi
 	# Use SRC (set by compile.sh) on host, /armbian inside container
 	local fw_dir="${SRC:-/armbian}/lib/functions/general"
-	for f in extensions.sh apt-utils.sh files.sh utils.sh; do
+	for f in extensions.sh apt-utils.sh; do
 		if [[ -f "${fw_dir}/${f}" ]]; then
 			# shellcheck disable=SC1090
 			source "${fw_dir}/${f}"
