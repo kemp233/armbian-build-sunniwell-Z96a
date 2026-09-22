@@ -205,9 +205,9 @@
 		pinctrl-names = "default", "rts_gpio";
 		pinctrl-0 = <&uart1m0_rtsn>;
 		pinctrl-1 = <&bt_rst_gpio>;
-		BT,reset_gpio = <&gpio3 RK_PB7 GPIO_ACTIVE_HIGH>;
-		BT,wake_gpio = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
-		BT,wake_host_irq = <&gpio3 RK_PC0 GPIO_ACTIVE_HIGH>;
+		BT,reset_gpio = <&gpio2 RK_PB7 GPIO_ACTIVE_HIGH>;
+		BT,wake_gpio = <&gpio2 RK_PC1 GPIO_ACTIVE_HIGH>;
+		BT,wake_host_irq = <&gpio2 RK_PC0 GPIO_ACTIVE_HIGH>;
 		status = "okay";
 	};
 };
@@ -327,6 +327,13 @@
  * This fixed regulator models the same always-on 3.3V rail with a
  * readable voltage. */
 / {
+	ext_cam_clk: external-camera-clock {
+		compatible = "fixed-clock";
+		clock-frequency = <24000000>;
+		clock-output-names = "CLK_CAMERA_24MHZ";
+		#clock-cells = <0>;
+	};
+
 	vcc3v3_io: vcc3v3-io {
 		compatible = "regulator-fixed";
 		regulator-name = "vcc3v3_io";
@@ -663,6 +670,90 @@
 				regulator-state-mem {
 					regulator-off-in-suspend;
 				};
+			};
+		};
+	};
+};
+
+/* HDMI input: LT6911UXC (HDMI2.0 -> MIPI CSI), on I2C3 @ 0x2b.
+ * Wiring decoded from the factory Android DTB (lb2004-android-raw.dts):
+ * power GPIO3_C4, reset GPIO3_C0 (active low), plugin-det/gpio5 GPIO3_C1,
+ * 4-lane CSI into csi2_dphy0 full mode. */
+&i2c3 {
+	status = "okay";
+
+	lt6911uxc: lt6911uxc@2b {
+		compatible = "lontium,lt6911uxc";
+		reg = <0x2b>;
+		clocks = <&ext_cam_clk>;
+		clock-names = "xvclk";
+		power-gpios = <&gpio3 RK_PC4 GPIO_ACTIVE_HIGH>;
+		gpio5-gpios = <&gpio3 RK_PC1 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpio3 RK_PC0 GPIO_ACTIVE_LOW>;
+		rockchip,camera-module-index = <0>;
+		rockchip,camera-module-facing = "back";
+		rockchip,camera-module-name = "LT6911UXC";
+		rockchip,camera-module-lens-name = "NC";
+		status = "okay";
+
+		port {
+			lt6911uxc_out: endpoint {
+				remote-endpoint = <&hdmi_to_mipi_in>;
+				data-lanes = <1 2 3 4>;
+			};
+		};
+	};
+};
+
+&csi2_dphy0 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			hdmi_to_mipi_in: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&lt6911uxc_out>;
+				data-lanes = <1 2 3 4>;
+			};
+		};
+
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			csidphy_out: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&mipi_csi2_input>;
+				data-lanes = <1 2 3 4>;
+			};
+		};
+	};
+};
+
+&mipi_csi2 {
+	status = "okay";
+
+	ports {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		port@0 {
+			reg = <0>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			mipi_csi2_input: endpoint@1 {
+				reg = <1>;
+				remote-endpoint = <&csidphy_out>;
+				data-lanes = <1 2 3 4>;
 			};
 		};
 	};
@@ -1230,7 +1321,7 @@
 
 	wireless-bluetooth {
 		bt_rst_gpio: bt-rst-gpio {
-			rockchip,pins = <3 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
+			rockchip,pins = <2 RK_PB7 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 
