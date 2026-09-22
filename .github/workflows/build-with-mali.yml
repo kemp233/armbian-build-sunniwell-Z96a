@@ -329,6 +329,12 @@ jobs:
 
       - name: Inject custom configs (boot, kernel, patches, blobs)
         run: |
+          # Disable failing z96a-rk817.patch (kernel source changed, hunks don't apply)
+          if [ -f "patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch" ]; then
+            mv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch \
+               patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch.disabled
+            echo "Disabled z96a-rk817.patch"
+          fi
           # Copy custom boot scripts
           mkdir -p config/bootscripts
           cp z96a-repo/custom/config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd config/bootscripts/
