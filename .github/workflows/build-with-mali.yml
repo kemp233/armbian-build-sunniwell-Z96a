@@ -191,7 +191,6 @@ jobs:
           ls -la builddir/
           echo "=== All .so files ==="
           find builddir -name "*.so*" -type f | head -30
-          # Check for libMali.so (the main library we need)
           if [ -f builddir/libMali.so ] || [ -f builddir/libmali.so.1.9.0 ]; then
             echo "Found Mali libraries in builddir/"
           else
@@ -218,7 +217,6 @@ jobs:
           mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl"
           mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm"
           
-          # Copy built libraries - they're in builddir/ not builddir/src/
           LIBMALI_SRC=""
           if [ -f builddir/libMali.so ]; then
             LIBMALI_SRC="builddir/libMali.so"
@@ -234,7 +232,6 @@ jobs:
           cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/libMali.so"
           cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/libMali.so"
           
-          # Create symlinks
           cd "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
           ln -sf mali-egl/libMali.so libMali.so
           ln -sf libMali.so libmali.so
@@ -247,7 +244,6 @@ jobs:
           
           cd /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/libmali-rockchip
           
-          # Create DEBIAN/control
           cat > "${PKG_DIR}/DEBIAN/control" << CONTROL
           Package: ${ARTIFACT_NAME}
           Version: ${VERSION}
@@ -261,7 +257,6 @@ jobs:
           Depends: libc6 (>= 2.31), libdrm2, libgbm1
           CONTROL
           
-          # Create DEBIAN/postinst for ldconfig
           cat > "${PKG_DIR}/DEBIAN/postinst" << 'POSTINST'
           #!/bin/sh
           set -e
@@ -269,10 +264,8 @@ jobs:
           POSTINST
           chmod 755 "${PKG_DIR}/DEBIAN/postinst"
           
-          # Build package
           dpkg-deb --build "${PKG_DIR}"
           
-          # Verify
           dpkg-deb -I "${PKG_DIR}.deb"
           dpkg-deb -c "${PKG_DIR}.deb"
 
@@ -291,7 +284,6 @@ jobs:
           path: mali-artifacts-output/*.deb
           retention-days: 7
 
-      # Upload custom/ and extensions/ from repo root for use in Armbian build job
       - name: Checkout our repo for custom files
         uses: actions/checkout@v4
         with:
@@ -342,14 +334,12 @@ jobs:
 
       - name: Prepare Mali packages for Armbian build
         run: |
-          # Copy Mali debs to a location accessible during build
           mkdir -p mali-repo
           cp mali-artifacts/*.deb mali-repo/
           echo "MALI_REPO_PATH=$(pwd)/mali-repo" >> $GITHUB_ENV
 
       - name: Prepare customisations
         run: |
-          # Copy custom files from downloaded artifacts
           rsync -av armbian-custom/custom/ custom/
           rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
           ls -la custom/
@@ -383,7 +373,6 @@ jobs:
 
       - name: Apply custom config & patches
         run: |
-          # Apply any custom patches
           if [ -d "custom/patches" ]; then
             for patch in custom/patches/*.patch; do
               [ -f "$patch" ] && patch -p1 < "$patch" || true
@@ -398,6 +387,7 @@ jobs:
           SOURCES
           
           # Create install hook for Mali packages
+          mkdir -p custom/hooks
           cat > custom/hooks/install-mali.sh << 'HOOK'
           #!/bin/bash
           # Install Mali G52 packages during Armbian build
@@ -405,14 +395,11 @@ jobs:
           
           echo "Installing Mali G52 packages..."
           
-          # Update package list to include our local repo
           apt-get update
           
-          # Install Mali packages
           apt-get install -y --allow-unauthenticated \
             libmali-bifrost-g52-g24p0-gbm-aarch64
           
-          # Ensure Mali libraries take precedence over Mesa
           update-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/mali-egl/libMali.so 100
           update-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/mali-egl/libMali.so 100
           update-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/mali-gbm/libMali.so 100
@@ -423,8 +410,6 @@ jobs:
 
       - name: Install Mali packages via hook (pre-customize)
         run: |
-          # Run the hook in a chroot environment simulation
-          # For now, we'll ensure the hook exists and will be run during build
           echo "Mali install hook prepared at custom/hooks/install-mali.sh"
           ls -la custom/hooks/
 
@@ -432,7 +417,6 @@ jobs:
         env:
           MALI_REPO_PATH: ${{ env.MALI_REPO_PATH }}
         run: |
-          # Build the image using Armbian framework
           ./compile.sh \
             BOARD=sunniwell-z96a \
             BRANCH=${{ github.event.inputs.armbian_kernel_branch }} \
@@ -448,9 +432,7 @@ jobs:
 
       - name: Verify Mali in output
         run: |
-          # Check that Mali libraries are in the output image
           find output/ -name "*mali*" -o -name "*libMali*" | head -20
-          # Check for image files
           find output/ -name "*.img" -o -name "*.img.xz" -o -name "*.img.gz" | head -10
 
       - name: Release
