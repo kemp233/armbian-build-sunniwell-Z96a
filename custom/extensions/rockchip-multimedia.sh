@@ -244,7 +244,7 @@ function customize_image__rockchip_multimedia_mali_symlinks() {
 
 	# Ensure Mali symlinks point to libmali wrapper, not Mesa
 	# These are installed by the workflow's install-mali.sh via pre-customize hook
-	local SDCARD="${SDCARD:-/}"
+	# SDCARD is a readonly global - use it directly
 
 	# libEGL
 	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libEGL.so.1"
@@ -278,7 +278,7 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 
 	display_alert "rockchip-multimedia" "verifying installation on rootfs" "info"
 
-	local SDCARD="${SDCARD:-/}"
+	# SDCARD is a readonly global - use it directly
 
 	# Check core libraries
 	for f in \
