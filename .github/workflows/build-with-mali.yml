@@ -392,6 +392,8 @@ jobs:
         run: |
           rsync -av armbian-custom/custom/ custom/
           rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
+          # Also copy custom/extensions (rockchip-multimedia.sh is there)
+          rsync -av armbian-custom/custom/extensions/ extensions/ 2>/dev/null || true
           ls -la custom/
           ls -la extensions/ 2>/dev/null || true
 
