@@ -299,7 +299,7 @@ jobs:
             our-repo/extensions/
           retention-days: 7
 
-      # 2. Build Armbian image with Mali packages
+  # 2. Build Armbian image with Mali packages
   build-armbian:
     name: Build Armbian Image (Z96A)
     runs-on: ubuntu-24.04
@@ -362,27 +362,6 @@ jobs:
           ls -la config/sources/families/rockchip-rk3568-z96a.conf
           ls -la patch/kernel/rockchip-rk3568-z96a/legacy/dt/
           ls -la packages/blobs/rk35/
-
-      - name: Checkout Armbian os repo (contains stable.json)
-        uses: actions/checkout@v4
-        with:
-          repository: armbian/os
-          path: os
-          ref: ${{ github.event.inputs.armbian_branch }}
-
-  # 2. Build Armbian image with Mali packages
-  build-armbian:
-    name: Build Armbian Image (Z96A)
-    runs-on: ubuntu-24.04
-    needs: build-mali
-    timeout-minutes: 120
-    steps:
-      - name: Checkout Armbian build framework
-        uses: actions/checkout@v4
-        with:
-          repository: momokind/armbian-build
-          path: .
-          ref: ${{ github.event.inputs.armbian_branch }}
 
       - name: Checkout Armbian os repo (contains stable.json)
         uses: actions/checkout@v4
