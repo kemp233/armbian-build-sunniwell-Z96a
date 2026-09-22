@@ -291,14 +291,20 @@ jobs:
           path: mali-artifacts-output/*.deb
           retention-days: 7
 
-      # Upload custom/ and extensions/ for use in Armbian build job
+      # Upload custom/ and extensions/ from repo root for use in Armbian build job
+      - name: Checkout our repo for custom files
+        uses: actions/checkout@v4
+        with:
+          path: our-repo
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Upload custom files
         uses: actions/upload-artifact@v4
         with:
           name: armbian-custom
           path: |
-            custom/
-            extensions/
+            our-repo/custom/
+            our-repo/extensions/
           retention-days: 7
 
   # 2. Build Armbian image with Mali packages
@@ -322,12 +328,6 @@ jobs:
           path: os
           ref: ${{ github.event.inputs.armbian_branch }}
 
-      - name: Checkout our repo for custom files
-        uses: actions/checkout@v4
-        with:
-          path: our-repo
-          token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Download Mali artifacts
         uses: actions/download-artifact@v4
         with:
@@ -349,12 +349,9 @@ jobs:
 
       - name: Prepare customisations
         run: |
-          # Copy custom files from our repo
-          rsync -av our-repo/custom/ custom/
-          rsync -av our-repo/extensions/ extensions/ 2>/dev/null || true
-          # Also copy from downloaded artifacts (backup)
-          rsync -av armbian-custom/custom/ custom/ 2>/dev/null || true
-          rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
+          # Copy custom files from downloaded artifacts
+          rsync -av armbian-custom/our-repo/custom/ custom/
+          rsync -av armbian-custom/our-repo/extensions/ extensions/ 2>/dev/null || true
           ls -la custom/
           ls -la extensions/ 2>/dev/null || true
 
