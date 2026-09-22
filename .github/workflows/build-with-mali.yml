@@ -229,11 +229,13 @@ jobs:
           fi
           
           echo "Using library: ${LIBMALI_SRC}"
-          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/libMali.so"
-          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/libMali.so"
+          # Create versioned library name that extension expects
+          VERSIONED_NAME="libmali-bifrost-g52-g24p0-gbm.so"
+          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/${VERSIONED_NAME}"
+          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/${VERSIONED_NAME}"
           
           cd "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
-          ln -sf mali-egl/libMali.so libMali.so
+          ln -sf mali-egl/${VERSIONED_NAME} libMali.so
           ln -sf libMali.so libmali.so
           ln -sf libMali.so libEGL.so
           ln -sf libMali.so libEGL.so.1
@@ -452,9 +454,11 @@ jobs:
           apt-get install -y --allow-unauthenticated \
             libmali-bifrost-g52-g24p0-gbm-aarch64
           
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/mali-egl/libMali.so 100
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/mali-egl/libMali.so 100
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/mali-gbm/libMali.so 100
+          # The package installs libmali-bifrost-g52-g24p0-gbm.so
+          # Set up update-alternatives to point to it
+          update-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/mali-egl/libmali-bifrost-g52-g24p0-gbm.so 100
+          update-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/mali-egl/libmali-bifrost-g52-g24p0-gbm.so 100
+          update-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/mali-gbm/libmali-bifrost-g52-g24p0-gbm.so 100
           
           echo "Mali G52 packages installed successfully"
           HOOK
