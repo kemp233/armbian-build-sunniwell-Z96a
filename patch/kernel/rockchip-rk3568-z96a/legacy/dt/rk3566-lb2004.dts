@@ -39,17 +39,21 @@
 		#size-cells = <2>;
 		ranges;
 
-		/* Small default CMA pool for the generic linux,cma area.
-		 * The NPU does NOT use this pool - rknpu_drv.c allocates from
-		 * the separate "rk-dma-heap-cma" pool, whose size is set by the
-		 * rk_dma_heap_cma=768M kernel command line parameter in
-		 * boot-lb2004-rk3566.cmd. A large linux,cma pool here would
-		 * conflict with the NPU pool's fixed base reservation. */
 		linux,cma {
 			compatible = "shared-dma-pool";
+			reusable;
 			size = <0x0 0x800000>;
 			alloc-ranges = <0x0 0x10000000 0x0 0x800000>;
 			linux,cma-default;
+		};
+
+		/* 128MB DMA pool for NPU - reserved_memory node, valid in both forks */
+		rknpu_mem: rknpu {
+			compatible = "shared-dma-pool";
+			inactive;
+			reusable;
+			size = <0x0 0x08000000>;
+			alignment = <0x0 0x1000>;
 		};
 
 		ramoops: ramoops@110000 {
@@ -155,11 +159,9 @@
 	};
 
 	/* Audio */
-	/* HDMI sound (rk356x.dtsi defines the card: i2s0 -> hdmi internal
-	 * route) drives the PAM8406 I2S class-D amp - on this board the
-	 * amp's I2S lines are tied to the HDMI audio path, same as the
-	 * factory Android DTB. Enabled via &hdmi_sound below, no pinctrl
-	 * needed: i2s0 -> hdmi is an internal SoC route. */
+	/* HDMI sound: i2s0 -> internal dw-hdmi transmitter (digital route,
+	 * no external pins - see &i2s0_8ch).  This is the only consumer of
+	 * i2s0 on this board. */
 	rk809_sound: rk809-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,format = "i2s";
@@ -377,9 +379,8 @@
 	};
 };
 
-/* HDMI / VOP display pipeline - PAM8406 amp audio rides the HDMI
- * audio path (i2s0 -> hdmi). rk356x.dtsi defines all the nodes and
- * endpoints; they default to disabled, enable them here. */
+/* HDMI / VOP display pipeline.  i2s0 feeds the internal dw-hdmi audio
+ * only - it is not muxed to external pins, so no pinctrl here. */
 &hdmi {
 	status = "okay";
 };
@@ -712,6 +713,16 @@
 	opp-1000000000 { /delete-property/ opp-supported-hw; };
 };
 
+/* OTP - the dtsi ships short clock-names ("usr","sbpi","apb","phy") but
+ * the rockchip-otp driver (rk3568_data) looks them up by full names via
+ * devm_clk_bulk_get, so clk lookup fails with -ENOENT, OTP never probes,
+ * nvmem cells are missing, and bus-npu cannot read leakage -> NPU opp
+ * table init fails ("failed to add opp table").  Restore the names the
+ * driver expects. */
+&otp {
+	clock-names = "clk_otpc_ns_usr", "clk_otpc_ns_sbpi",
+		      "pclk_otpc_ns", "pclk_otpphy";
+};
 &pinctrl {
 	/* rk3568-pinctrl.dtsi has no i2s0 groups (i2s0 is normally an
 	 * internal route to hdmi).  On LB2004 the PAM8406 amp listens on
@@ -744,12 +755,12 @@
 };
 
 &i2s0_8ch {
-	/* PAM8406 amp audio: the amp's I2S lines are tied to the HDMI
-	 * audio path, which on this board is i2s0 routed to external
-	 * pins on the gpio3 bank (see pinctrl groups above). */
-	pinctrl-names = "default";
-	pinctrl-0 = <&i2s0m0_mclk &i2s0m0_sclk &i2s0m0_lrck
-		     &i2s0m0_sdo0 &i2s0m0_sdi0>;
+	/* i2s0 is the HDMI audio source: it feeds the internal dw-hdmi
+	 * transmitter via the hdmi_sound machine driver.  It must NOT
+	 * also be muxed onto GPIO3 external pins - that double-binds the
+	 * controller (BCLK/LRCK/MCLK fight between the internal HDMI route
+	 * and the external pins) and was the cause of distorted playback.
+	 * The PAM8406 amp listens on i2s1 (see &i2s1_8ch), not here. */
 	status = "okay";
 };
 
@@ -942,10 +953,7 @@
 &rknpu {
 	/* rknpu-supply per original Android DTB = vdd_npu (RK809 DCDC_REG4) */
 	rknpu-supply = <&vdd_npu>;
-	/* No memory-region here: the NPU allocates from the separate
-	 * "rk-dma-heap-cma" pool whose size is set by the
-	 * rk_dma_heap_cma=768M kernel command line parameter (see
-	 * boot-lb2004-rk3566.cmd), not from a DT reserved-memory node. */
+	memory-region = <&rknpu_mem>;
 	status = "okay";
 };
 #endif
