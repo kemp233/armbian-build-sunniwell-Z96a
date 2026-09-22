@@ -350,8 +350,8 @@ jobs:
       - name: Prepare customisations
         run: |
           # Copy custom files from downloaded artifacts
-          rsync -av armbian-custom/our-repo/custom/ custom/
-          rsync -av armbian-custom/our-repo/extensions/ extensions/ 2>/dev/null || true
+          rsync -av armbian-custom/custom/ custom/
+          rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
           ls -la custom/
           ls -la extensions/ 2>/dev/null || true
 
