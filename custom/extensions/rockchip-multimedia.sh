@@ -222,7 +222,7 @@ function _rockchip_multimedia_build_vaapi() {
 }
 
 # ============================================================ Hooks --
-function pre_debootstrap__rockchip_multimedia_install() {
+function pre_customize_image__rockchip_multimedia_install() {
 	_rmm_source_framework || return 1
 	_rmm_init
 
