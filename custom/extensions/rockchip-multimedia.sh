@@ -196,11 +196,26 @@ function _rockchip_multimedia_build_rga() {
 	local build_dir="${work_dir}/build/librga"
 	local stage_dir="${work_dir}/stage/librga"
 
-	_rockchip_multimedia_fetch_pinned "${EXT_RGA_GIT}" "${EXT_RGA_REF}" "${src_dir}"
+	_rockchip_multimedia_fetch_pinned "${EXT_RGA_GIT}" "${EXT_RGA_REF}" "${src_dir}" || return 1
 
+	# Upstream librga (airockchip) ships prebuilt libraries and headers; the
+	# old CMakeLists.txt build was removed.  Just stage the aarch64 libs +
+	# headers and copy them into the image.
+	local prebuilt_dir="${src_dir}/libs/Linux/gcc-aarch64"
+	if [[ -f "${prebuilt_dir}/librga.so" ]]; then
+		display_alert "rockchip-multimedia" "installing librga prebuilt (aarch64)" "info"
+		mkdir -p "${stage_dir}${prefix}/${lib_dir}" "${stage_dir}${prefix}/include/rga"
+		cp -a "${prebuilt_dir}/librga.so" "${stage_dir}${prefix}/${lib_dir}/librga.so"
+		cp -a "${prebuilt_dir}/librga.a" "${stage_dir}${prefix}/${lib_dir}/librga.a" 2>/dev/null || true
+		cp -a "${src_dir}/include/." "${stage_dir}${prefix}/include/rga/" 2>/dev/null || true
+		rsync -av "${stage_dir}/" "${SDCARD}/"
+		return 0
+	fi
+
+	# Fall back to building from source for older librga releases.
 	mkdir -p "${build_dir}"
 	cd "${build_dir}"
-	
+
 	local cmake_cross_flags=()
 	if [[ "${_RMM_NATIVE_BUILD:-0}" == "1" ]]; then
 		cmake_cross_flags=()
@@ -238,13 +253,17 @@ function _rockchip_multimedia_build_rknn() {
 	local src_dir="${work_dir}/src/rknn-toolkit2"
 	local stage_dir="${work_dir}/stage/rknn"
 
-	_rockchip_multimedia_fetch_pinned "${EXT_RKNN_GIT}" "${EXT_RKNN_REF}" "${src_dir}"
+	_rockchip_multimedia_fetch_pinned "${EXT_RKNN_GIT}" "${EXT_RKNN_REF}" "${src_dir}" || return 1
 
-	# RKNN toolkit2 provides prebuilt libs in rknn-toolkit2/rknpu2/runtime/Linux/lib64/
-	local prebuilt_dir="${src_dir}/rknpu2/runtime/Linux/lib64"
+	# RKNN toolkit2 provides prebuilt libs under
+	# rknpu2/runtime/Linux/librknn_api/aarch64/
+	local prebuilt_dir="${src_dir}/rknpu2/runtime/Linux/librknn_api/aarch64"
+	local include_dir="${src_dir}/rknpu2/runtime/Linux/librknn_api/include"
 	if [[ -d "${prebuilt_dir}" ]]; then
-		mkdir -p "${stage_dir}/${lib_dir}"
+		display_alert "rockchip-multimedia" "installing RKNN prebuilt runtime (aarch64)" "info"
+		mkdir -p "${stage_dir}/${lib_dir}" "${stage_dir}${prefix}/include/rockchip"
 		cp -av "${prebuilt_dir}/"*.so* "${stage_dir}/${lib_dir}/"
+		[[ -d "${include_dir}" ]] && cp -av "${include_dir}/"*.h "${stage_dir}${prefix}/include/rockchip/" 2>/dev/null || true
 		rsync -av "${stage_dir}/" "${SDCARD}/"
 	else
 		display_alert "rockchip-multimedia" "RKNN prebuilt libs not found at ${prebuilt_dir}" "warn"
@@ -255,42 +274,27 @@ function _rockchip_multimedia_build_rknn() {
 function _rockchip_multimedia_build_vaapi() {
 	_rmm_init
 	local src_dir="${work_dir}/src/libva-rkmpp"
-	local build_dir="${work_dir}/build/libva-rkmpp"
 	local stage_dir="${work_dir}/stage/libva-rkmpp"
 
-	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}"
+	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}" || return 1
 
-	mkdir -p "${build_dir}"
-	cd "${build_dir}"
-	
-	local cmake_cross_flags=()
-	if [[ "${_RMM_NATIVE_BUILD:-0}" == "1" ]]; then
-		cmake_cross_flags=()
+	# kleopatra999/rockchip-va-driver uses autotools (autogen.sh), not cmake.
+	cd "${src_dir}"
+	if [[ -x ./autogen.sh ]]; then
+		./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
+			--enable-drm --disable-x11 2>&1 || {
+			display_alert "rockchip-multimedia" "VA-API autogen/configure failed" "err"
+			return 1
+		}
+		make -j"$(nproc)" 2>&1 || {
+			display_alert "rockchip-multimedia" "VA-API build failed" "err"
+			return 1
+		}
+		DESTDIR="${stage_dir}" make install 2>&1
+		rsync -av "${stage_dir}/" "${SDCARD}/"
 	else
-		cmake_cross_flags=(
-			-DCMAKE_CROSSCOMPILING=ON
-			-DCMAKE_SYSTEM_NAME=Linux
-			-DCMAKE_SYSTEM_PROCESSOR=aarch64
-			-DCMAKE_SYSROOT="${SDCARD}"
-			-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER
-			-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY
-			-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY
-			-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
-		)
+		display_alert "rockchip-multimedia" "VA-API: no autogen.sh in ${src_dir}" "warn"
 	fi
-
-	cmake "${src_dir}" \
-		-DCMAKE_INSTALL_PREFIX="${prefix}" \
-		-DCMAKE_BUILD_TYPE=Release \
-		-DBUILD_TESTS=OFF \
-		-DCMAKE_C_COMPILER="${CC}" \
-		-DCMAKE_CXX_COMPILER="${CXX}" \
-		"${cmake_cross_flags[@]}"
-	[[ -n "${STRIP:-}" ]] && cmake -DCMAKE_STRIP="${STRIP}" .
-
-	make -j"$(nproc)"
-	DESTDIR="${stage_dir}" make install
-	rsync -av "${stage_dir}/" "${SDCARD}/"
 }
 
 # ============================================================ Hooks --
