@@ -23,7 +23,10 @@ function _rmm_setup_cross_compile() {
 		export CROSS_COMPILE=""
 		export CC="gcc"
 		export CXX="g++"
-		export STRIP="strip"
+		# Resolve strip to an absolute path; the armbian docker image may not
+		# have it in PATH, and cmake records CMAKE_STRIP verbatim, so a bare
+		# "strip" becomes <build_dir>/strip and fails with "not found".
+		export STRIP="$(command -v strip || true)"
 		export _RMM_NATIVE_BUILD=1
 	else
 		# Cross-compilation from x86_64 to ARM64
@@ -169,8 +172,10 @@ function _rockchip_multimedia_build_mpp() {
 		-DBUILD_STATIC=OFF \
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
-		-DCMAKE_STRIP="${STRIP}" \
 		"${cmake_cross_flags[@]}"
+	# Only pass CMAKE_STRIP when we actually have one; an empty/invalid
+	# value makes the static-library "strip" step fail with Error 127.
+	[[ -n "${STRIP:-}" ]] && cmake -DCMAKE_STRIP="${STRIP}" .
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
@@ -212,8 +217,8 @@ function _rockchip_multimedia_build_rga() {
 		-DBUILD_SHARED_LIBS=ON \
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
-		-DCMAKE_STRIP="${STRIP}" \
 		"${cmake_cross_flags[@]}"
+	[[ -n "${STRIP:-}" ]] && cmake -DCMAKE_STRIP="${STRIP}" .
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
@@ -273,8 +278,8 @@ function _rockchip_multimedia_build_vaapi() {
 		-DBUILD_TESTS=OFF \
 		-DCMAKE_C_COMPILER="${CC}" \
 		-DCMAKE_CXX_COMPILER="${CXX}" \
-		-DCMAKE_STRIP="${STRIP}" \
 		"${cmake_cross_flags[@]}"
+	[[ -n "${STRIP:-}" ]] && cmake -DCMAKE_STRIP="${STRIP}" .
 
 	make -j"$(nproc)"
 	DESTDIR="${stage_dir}" make install
