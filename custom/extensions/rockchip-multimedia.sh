@@ -375,16 +375,26 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 
 	# SDCARD is a readonly global - use it directly
 
-	# Check core libraries
+	# Check core libraries. Names match what the build steps actually install:
+	# MPP installs librockchip_mpp.so (not libmpp.so), librga ships prebuilt
+	# librga.so, RKNN runtime ships librknnrt.so (not librknn_api.so).
+	# The VA-API driver (rkmpp_drv_video.so) is optional - its build is
+	# non-fatal because it needs librkenc-* which we do not build.
 	for f in \
-		"${lib_dir}/libmpp.so" \
+		"${lib_dir}/librockchip_mpp.so" \
 		"${lib_dir}/librga.so" \
-		"${lib_dir}/librknn_api.so" \
-		"${lib_dir}/librknnrt.so" \
+		"${lib_dir}/librknnrt.so"; do
+		if [[ ! -e "${SDCARD}/${f}" ]]; then
+			exit_with_error "rockchip-multimedia: expected file missing from rootfs: /${f}"
+		fi
+	done
+
+	# Optional bits: only warn if the VA-API driver was skipped.
+	for f in \
 		"${lib_dir}/dri/rkmpp_drv_video.so" \
 		"etc/profile.d/rockchip-vaapi.sh"; do
 		if [[ ! -e "${SDCARD}/${f}" ]]; then
-			exit_with_error "rockchip-multimedia: expected file missing from rootfs: /${f}"
+			display_alert "rockchip-multimedia" "optional file missing from rootfs: /${f}" "warn"
 		fi
 	done
 
