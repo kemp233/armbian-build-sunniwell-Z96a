@@ -204,10 +204,12 @@ function _rockchip_multimedia_build_rga() {
 	local prebuilt_dir="${src_dir}/libs/Linux/gcc-aarch64"
 	if [[ -f "${prebuilt_dir}/librga.so" ]]; then
 		display_alert "rockchip-multimedia" "installing librga prebuilt (aarch64)" "info"
-		mkdir -p "${stage_dir}${prefix}/${lib_dir}" "${stage_dir}${prefix}/include/rga"
-		cp -a "${prebuilt_dir}/librga.so" "${stage_dir}${prefix}/${lib_dir}/librga.so"
-		cp -a "${prebuilt_dir}/librga.a" "${stage_dir}${prefix}/${lib_dir}/librga.a" 2>/dev/null || true
-		cp -a "${src_dir}/include/." "${stage_dir}${prefix}/include/rga/" 2>/dev/null || true
+		# NOTE: lib_dir is already relative ("usr/lib/aarch64-linux-gnu"), so it
+		# must NOT be prefixed with ${prefix} - that would yield usr/usr/lib/...
+		mkdir -p "${stage_dir}/${lib_dir}" "${stage_dir}/usr/include/rga"
+		cp -a "${prebuilt_dir}/librga.so" "${stage_dir}/${lib_dir}/librga.so"
+		cp -a "${prebuilt_dir}/librga.a" "${stage_dir}/${lib_dir}/librga.a" 2>/dev/null || true
+		cp -a "${src_dir}/include/." "${stage_dir}/usr/include/rga/" 2>/dev/null || true
 		rsync -av "${stage_dir}/" "${SDCARD}/"
 		return 0
 	fi
