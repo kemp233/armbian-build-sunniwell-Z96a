@@ -530,7 +530,7 @@ jobs:
             BUILD_DESKTOP=${{ github.event.inputs.armbian_ui }} \
             BUILD_MINIMAL=yes \
             KERNEL_CONFIGURE=no \
-            COMPRESS_OUTPUTIMAGE=sha,gpg,img \
+            COMPRESS_OUTPUTIMAGE=sha,gpg \
             CLEAN_LEVEL=make,debs \
             EXTERNAL=yes \
             EXTERNAL_NEW=pre-built \
@@ -540,6 +540,9 @@ jobs:
         run: |
           find output/ -name "*mali*" -o -name "*libMali*" | head -20
           find output/ -name "*.img" -o -name "*.img.xz" -o -name "*.img.gz" | head -10
+          # The raw .img is ~2.4 GB and exceeds the 2 GiB release-asset limit;
+          # make sure only the compressed .img.xz is published.
+          rm -fv output/images/*.img
 
       - name: Release
         uses: softprops/action-gh-release@v1
@@ -548,7 +551,8 @@ jobs:
           tag_name: armbian-z96a-${{ github.event.inputs.armbian_release }}-${{ github.run_number }}
           name: Armbian Z96A Mali G52 ${{ github.event.inputs.armbian_release }} #${{ github.run_number }}
           files: |
-            output/images/*.img*
+            output/images/*.img.xz
+            output/images/*.img.gz
             output/images/*.sha
             output/debs/*.deb
           draft: false
