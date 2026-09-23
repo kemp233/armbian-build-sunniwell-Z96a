@@ -285,6 +285,16 @@ function _rockchip_multimedia_build_vaapi() {
 		apt-get -qq update -y && apt-get -qq install -y libva-dev
 	fi
 
+	# The driver links against librkenc-h264e and friends, which come from
+	# the MPP step we just ran.  Point the linker and pkg-config at the
+	# staged tree so configure/make can see them.
+	local mpp_stage="${work_dir}/stage/mpp"
+	if [[ -d "${mpp_stage}${prefix}/${lib_dir}" ]]; then
+		export LIBRARY_PATH="${mpp_stage}${prefix}/${lib_dir}:${LIBRARY_PATH:-}"
+		export LD_LIBRARY_PATH="${mpp_stage}${prefix}/${lib_dir}:${LD_LIBRARY_PATH:-}"
+		export PKG_CONFIG_PATH="${mpp_stage}${prefix}/${lib_dir}/pkgconfig:${PKG_CONFIG_PATH:-}"
+	fi
+
 	cd "${src_dir}"
 	if [[ -x ./autogen.sh ]]; then
 		./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
