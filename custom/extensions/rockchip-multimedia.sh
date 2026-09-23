@@ -333,15 +333,16 @@ function pre_customize_image__rockchip_multimedia_install() {
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
 
-function customize_image__rockchip_multimedia_mali_symlinks() {
-	_rmm_source_framework || return 1
-	_rmm_init
-
+# NOTE: this used to be a customize_image__ hook, but the framework only
+# honours the first customize_image definition and logs
+# "Extension conflict ... ignoring functions: customize_image__rockchip_..."
+# for ours, so the symlinks never got created.  It is now called from the
+# pre_umount_final_image verify hook, which runs after every other hook.
+function _rockchip_multimedia_setup_mali_symlinks() {
 	display_alert "rockchip-multimedia" "setting up Mali G52 EGL/GLES/GBM/OpenCL symlinks" "info"
 
 	# Ensure Mali symlinks point to libmali wrapper, not Mesa
 	# These are installed by the workflow's install-mali.sh via pre-customize hook
-	# SDCARD is a readonly global - use it directly
 
 	# libEGL
 	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libEGL.so.1"
@@ -372,6 +373,10 @@ EOF
 function pre_umount_final_image__rockchip_multimedia_verify() {
 	_rmm_source_framework || return 1
 	_rmm_init
+
+	# Set up the Mali symlinks here (the customize_image hook is dropped by
+	# the framework due to an "Extension conflict") and *then* verify.
+	_rockchip_multimedia_setup_mali_symlinks
 
 	display_alert "rockchip-multimedia" "verifying installation on rootfs" "info"
 
