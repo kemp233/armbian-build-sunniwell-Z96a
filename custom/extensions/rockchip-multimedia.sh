@@ -58,7 +58,11 @@ function _rmm_pinned_versions() {
 
 # Work directory
 function _rmm_setup_work_dir() {
-	local work_dir="${1:-/tmp/rockchip-multimedia}"
+	# Declare globally so _rockchip_multimedia_build_*() can see it.
+	# A `local` here would be invisible outside this function and the
+	# callers would resolve ${work_dir} to an empty string, which made
+	# cmake write into /build/mpp and look for /build/mpp/strip.
+	declare -g work_dir="${1:-/tmp/rockchip-multimedia}"
 	mkdir -p "${work_dir}/src" "${work_dir}/build" "${work_dir}/stage"
 }
 
