@@ -296,18 +296,21 @@ function _rockchip_multimedia_build_vaapi() {
 	fi
 
 	cd "${src_dir}"
+	# NOTE: rockchip-va-driver links against librkenc-h264e / librkenc-h265e,
+	# which are NOT produced by rockchip-linux/mpp (they come from a separate
+	# rockchip encoder package we do not build).  VA-API here is a convenience
+	# layer only - the primary video decode/encode path on Rockchip is MPP via
+	# librockchip_mpp, which we do install.  So a VA-API failure must not abort
+	# the whole image build.
 	if [[ -x ./autogen.sh ]]; then
-		./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
-			--enable-drm --disable-x11 2>&1 || {
-			display_alert "rockchip-multimedia" "VA-API autogen/configure failed" "err"
-			return 1
-		}
-		make -j"$(nproc)" 2>&1 || {
-			display_alert "rockchip-multimedia" "VA-API build failed" "err"
-			return 1
-		}
-		DESTDIR="${stage_dir}" make install 2>&1
-		rsync -av "${stage_dir}/" "${SDCARD}/"
+		if ./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
+			--enable-drm --disable-x11 2>&1 && \
+			make -j"$(nproc)" 2>&1; then
+			DESTDIR="${stage_dir}" make install 2>&1
+			rsync -av "${stage_dir}/" "${SDCARD}/"
+		else
+			display_alert "rockchip-multimedia" "VA-API driver build failed (missing librkenc-*); skipping - MPP remains the video path" "warn"
+		fi
 	else
 		display_alert "rockchip-multimedia" "VA-API: no autogen.sh in ${src_dir}" "warn"
 	fi
