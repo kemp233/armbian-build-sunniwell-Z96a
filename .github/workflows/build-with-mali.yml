@@ -470,6 +470,11 @@ jobs:
           HOOK
           chmod +x custom/hooks/install-mali.sh
 
+      - name: Install build dependencies (cmake, gcc, etc. for native ARM64 build)
+        run: |
+          apt-get update
+          apt-get install -y cmake build-essential pkg-config git
+
       - name: Install Mali packages via hook (pre-customize)
         run: |
           echo "Mali install hook prepared at custom/hooks/install-mali.sh"
