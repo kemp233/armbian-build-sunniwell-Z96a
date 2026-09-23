@@ -470,15 +470,49 @@ jobs:
           HOOK
           chmod +x custom/hooks/install-mali.sh
 
+      - name: Configure apt sources for ARM64 (native runner)
+        run: |
+          # The ubuntu-24.04-arm runner may have incomplete sources.list for ARM64 packages
+          # Configure proper sources for native ARM64 build
+          sudo tee /etc/apt/sources.list.d/ubuntu.sources > /dev/null << 'SOURCES'
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: noble noble-updates noble-backports
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: http://ports.ubuntu.com/ubuntu-ports/
+          Suites: noble-security
+          Components: main universe restricted multiverse
+          Architectures: arm64
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SOURCES
+          # Also ensure the main sources.list has arm64 entries
+          if ! grep -q "ports.ubuntu.com" /etc/apt/sources.list 2>/dev/null; then
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble main universe restricted multiverse" | sudo tee -a /etc/apt/sources.list
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-updates main universe restricted multiverse" | sudo tee -a /etc/apt/sources.list
+            echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports/ noble-security main universe restricted multiverse" | sudo tee -a /etc/apt/sources.list
+          fi
+          sudo apt-get update
+
       - name: Install build dependencies (cmake, gcc, etc. for native ARM64 build)
         run: |
-          # Wait for apt lock if another process is using it
-          while fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-            echo "Waiting for apt lock..."
+          # Wait for apt lock if another process is using it (dpkg and apt locks)
+          while fuser /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock >/dev/null 2>&1; do
+            echo "Waiting for apt/dpkg lock..."
             sleep 5
           done
-          apt-get update
-          apt-get install -y cmake build-essential pkg-config git
+          # Retry apt-get update up to 3 times
+          for i in {1..3}; do
+            if sudo apt-get update; then
+              break
+            fi
+            echo "apt-get update failed, retrying in 10 seconds... (attempt $i/3)"
+            sleep 10
+          done
+          sudo apt-get install -y cmake build-essential pkg-config git
 
       - name: Install Mali packages via hook (pre-customize)
         run: |
