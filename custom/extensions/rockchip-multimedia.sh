@@ -43,13 +43,13 @@ function _rmm_setup_cross_compile() {
 # Pinned versions
 function _rmm_pinned_versions() {
 	EXT_MPP_GIT="https://github.com/rockchip-linux/mpp.git"
-	EXT_MPP_REF="f8b8a3a7f7c2c5e8e8c6e0f6b8a3c5d8e9f0a1b2"  # mpp 1.5.0-ish
-	EXT_RGA_GIT="https://github.com/rockchip-linux/librga.git"
-	EXT_RGA_REF="v2.1.0"
+	EXT_MPP_REF="1.1.0"  # latest release tag
+	EXT_RGA_GIT="https://github.com/airockchip/librga.git"
+	EXT_RGA_REF="v1.10.0"
 	EXT_RKNN_GIT="https://github.com/rockchip-linux/rknn-toolkit2.git"
-	EXT_RKNN_REF="v2.3.0"
-	EXT_VADRV_GIT="https://github.com/rockchip-linux/libva-rkmpp.git"
-	EXT_VADRV_REF="v1.0.0"
+	EXT_RKNN_REF="v1.6.0"  # latest release tag
+	EXT_VADRV_GIT="https://github.com/kleopatra999/rockchip-va-driver.git"
+	EXT_VADRV_REF="master"
 
 	# Mali-G52 (Bifrost, CSF) - INSTALLED VIA DEBS FROM WORKFLOW
 	# The workflow cross-compiles libmali and creates debs that are installed via install-mali.sh
@@ -124,7 +124,7 @@ function _rockchip_multimedia_fetch_pinned() {
 	local git_url="$1"
 	local git_ref="$2"
 	local dst_dir="$3"
-	
+
 	if [[ -d "${dst_dir}/.git" ]]; then
 		cd "${dst_dir}"
 		git fetch --depth 1 origin "${git_ref}" 2>/dev/null || true
@@ -132,6 +132,13 @@ function _rockchip_multimedia_fetch_pinned() {
 	else
 		git clone --depth 1 --branch "${git_ref}" "${git_url}" "${dst_dir}" 2>/dev/null || \
 		git clone --depth 1 "${git_url}" "${dst_dir}" && cd "${dst_dir}"
+	fi
+
+	# Fail loudly if we still have no sources; building an empty tree
+	# produces confusing cmake/make errors further down.
+	if [[ ! -f "${dst_dir}/README.md" && ! -f "${dst_dir}/CMakeLists.txt" && ! -f "${dst_dir}/meson.build" ]]; then
+		display_alert "rockchip-multimedia" "Failed to fetch ${git_url}@${git_ref}" "err"
+		return 1
 	fi
 }
 
