@@ -279,6 +279,12 @@ function _rockchip_multimedia_build_vaapi() {
 	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}" || return 1
 
 	# kleopatra999/rockchip-va-driver uses autotools (autogen.sh), not cmake.
+	# It needs libva's headers + pkg-config file on the *build* host.
+	if ! pkg-config --exists libva 2>/dev/null; then
+		display_alert "rockchip-multimedia" "installing libva dev package for VA-API build" "info"
+		apt-get -qq update -y && apt-get -qq install -y libva-dev
+	fi
+
 	cd "${src_dir}"
 	if [[ -x ./autogen.sh ]]; then
 		./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
