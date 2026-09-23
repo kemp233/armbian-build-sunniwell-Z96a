@@ -472,6 +472,11 @@ jobs:
 
       - name: Install build dependencies (cmake, gcc, etc. for native ARM64 build)
         run: |
+          # Wait for apt lock if another process is using it
+          while fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+            echo "Waiting for apt lock..."
+            sleep 5
+          done
           apt-get update
           apt-get install -y cmake build-essential pkg-config git
 
