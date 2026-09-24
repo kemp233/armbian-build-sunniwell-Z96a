@@ -388,9 +388,9 @@ jobs:
       - name: Prepare Mali packages for Armbian build
         run: |
           set -euo pipefail
-          mkdir -p custom/mali-repo
-          cp mali-artifacts/*.deb custom/mali-repo/
-          echo "MALI_REPO_PATH=$(pwd)/custom/mali-repo" >> "$GITHUB_ENV"
+          mkdir -p extensions/mali-repo
+          cp mali-artifacts/*.deb extensions/mali-repo/
+          echo "MALI_REPO_PATH=$(pwd)/extensions/mali-repo" >> "$GITHUB_ENV"
 
       - name: Prepare customisations
         run: |
@@ -460,7 +460,7 @@ jobs:
       - name: Verify Mali package for image build
         run: |
           set -euo pipefail
-          MALI_REPO="custom/mali-repo"
+          MALI_REPO="extensions/mali-repo"
           MALI_DEB="$(find "$MALI_REPO" -maxdepth 1 -type f -name 'libmali-*.deb' -print -quit)"
           test -n "$MALI_DEB"
           test -s "$MALI_DEB"
