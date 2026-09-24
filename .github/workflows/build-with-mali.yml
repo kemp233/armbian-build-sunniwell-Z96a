@@ -528,7 +528,7 @@ jobs:
             BRANCH=${{ github.event.inputs.armbian_kernel_branch }} \
             RELEASE=${{ github.event.inputs.armbian_release }} \
             BUILD_DESKTOP=${{ github.event.inputs.armbian_ui }} \
-            BUILD_MINIMAL=yes \
+            BUILD_MINIMAL=no \
             KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha,gpg,xz \
             CLEAN_LEVEL=make,debs \
