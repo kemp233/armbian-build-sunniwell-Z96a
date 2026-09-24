@@ -428,6 +428,11 @@ jobs:
             rsync -a custom/blobs/ blobs/
           fi
 
+          # Artifact downloads do not preserve Unix executable bits.
+          if [ -f packages/bsp/common/usr/lib/armbian/armbian-apt-updates ]; then
+            chmod +x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
+          fi
+
           # The upstream kernel fork already contains the RK817 support.
           rm -fv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
 
@@ -459,6 +464,7 @@ jobs:
           test -f "$UBOOT_PATCH/0004-enable-gpio3-gpio4-i2c0-saradc.patch"
           test -f packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin
           test -f packages/blobs/rk35/rk3568_bl31_v1.43.elf
+          test -x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
 
           grep -qx 'CONFIG_USB_USBNET=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_NET_AX88179_178A=y' "$KCONFIG"
