@@ -292,8 +292,16 @@ jobs:
         with:
           name: armbian-custom
           path: |
-            our-repo/custom/
+            our-repo/config/
+            our-repo/patch/
+            our-repo/packages/
             our-repo/extensions/
+            our-repo/blobs/
+            our-repo/custom/
+            our-repo/userpatches/
+            our-repo/lib/functions/rootfs/rootfs-create.sh
+            our-repo/lib/functions/rootfs/apt-install.sh
+          if-no-files-found: warn
           retention-days: 7
 
   # 2. Build Armbian image with Mali packages (native ARM64 runner - no qemu needed)
@@ -317,54 +325,16 @@ jobs:
           path: z96a-repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Inject z96a-v2 board config
+      - name: Confirm repository sources
         run: |
-          cp z96a-repo/config/boards/z96a-v2.conf config/boards/z96a-v2.conf
-          ls -la config/boards/z96a-v2.conf
-
-      - name: Inject custom configs (boot, kernel, patches, blobs)
-        run: |
-          # Disable failing z96a-rk817.patch (kernel source changed, hunks don't apply)
-          if [ -f "patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch" ]; then
-            mv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch \
-               patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch.disabled
-            echo "Disabled z96a-rk817.patch"
-          fi
-          # Copy custom boot scripts
-          mkdir -p config/bootscripts
-          cp z96a-repo/custom/config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd config/bootscripts/
-          
-          # Copy custom bootenv
-          mkdir -p config/bootenv
-          cp z96a-repo/custom/config/bootenv/boot-z96a-rk3568-laptop-v2.cmd config/bootenv/ 2>/dev/null || true
-          
-          # Copy custom kernel config
-          mkdir -p config/kernel
-          cp z96a-repo/custom/config/kernel/linux-rockchip-rk3568-z96a-legacy.config config/kernel/
-          
-          # Copy custom family config
-          mkdir -p config/sources/families
-          cp z96a-repo/custom/config/sources/families/rockchip-rk3568-z96a.conf config/sources/families/
-          
-          # Copy custom patches
-          mkdir -p patch/kernel/rockchip-rk3568-z96a/legacy/dt
-          cp -r z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/dt/*.dts patch/kernel/rockchip-rk3568-z96a/legacy/dt/ 2>/dev/null || true
-          cp z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/*.patch patch/kernel/rockchip-rk3568-z96a/legacy/ 2>/dev/null || true
-          
-          # Copy custom blobs
-          mkdir -p packages/blobs/rk35
-          cp z96a-repo/packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin packages/blobs/rk35/ 2>/dev/null || true
-          
-          # Copy custom optional packages (udev rules etc)
-          mkdir -p config/optional/boards
-          cp -r z96a-repo/custom/config/optional/boards/z96a-v2 config/optional/boards/ 2>/dev/null || true
-          
-          ls -la config/boards/z96a-v2.conf
-          ls -la config/bootscripts/boot-z96a-rk3568-laptop-v2.cmd
-          ls -la config/kernel/linux-rockchip-rk3568-z96a-legacy.config
-          ls -la config/sources/families/rockchip-rk3568-z96a.conf
-          ls -la patch/kernel/rockchip-rk3568-z96a/legacy/dt/
-          ls -la packages/blobs/rk35/
+          set -euo pipefail
+          test -f z96a-repo/config/boards/z96a-v2.conf
+          test -f z96a-repo/config/kernel/linux-rockchip-rk3568-z96a-legacy.config
+          test -f z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/0000.patching_config.yaml
+          test -f z96a-repo/patch/u-boot/legacy/board_z96a-v2/0003-add-full-uboot-commands.patch
+          test -f z96a-repo/patch/u-boot/legacy/board_z96a-v2/0004-enable-gpio3-gpio4-i2c0-saradc.patch
+          test -d z96a-repo/custom/config/sources
+          test -d z96a-repo/custom/extensions
 
       - name: Checkout Armbian os repo (contains stable.json)
         uses: actions/checkout@v4
@@ -392,36 +362,122 @@ jobs:
           cp mali-artifacts/*.deb extensions/mali-repo/
           echo "MALI_REPO_PATH=$(pwd)/extensions/mali-repo" >> "$GITHUB_ENV"
 
-      - name: Prepare customisations
-        run: |
-          rsync -av armbian-custom/custom/ custom/
-          rsync -av armbian-custom/extensions/ extensions/ 2>/dev/null || true
-          # Also copy custom/extensions (rockchip-multimedia.sh is there)
-          rsync -av armbian-custom/custom/extensions/ extensions/ 2>/dev/null || true
-          ls -la custom/
-          ls -la extensions/ 2>/dev/null || true
-
-      - name: Verify USB Ethernet and RTL8832BU build inputs
+      - name: Prepare complete customisations
         run: |
           set -euo pipefail
-          KCONFIG="z96a-repo/custom/config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
-          BOARD_CONFIG="z96a-repo/config/boards/z96a-v2.conf"
-          RTL_PATCH="z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/0002-wifi-add-rtl8852bu-driver-for-z96a.patch"
+          rm -rf custom
+          mkdir -p custom
+
+          # Mirror the complete-artifact action's full repository staging chain.
+          for dir in config patch packages extensions blobs; do
+            if [ -d "armbian-custom/$dir" ]; then
+              mkdir -p "custom/$dir"
+              rsync -a "armbian-custom/$dir/" "custom/$dir/"
+            fi
+          done
+
+          # Keep the newer root board/kernel configuration, while bringing in
+          # the custom-only Z96A family, boot, optional, and extension files.
+          for dir in bootscripts bootenv sources optional; do
+            if [ -d "armbian-custom/custom/config/$dir" ]; then
+              mkdir -p "custom/config/$dir"
+              rsync -a "armbian-custom/custom/config/$dir/" "custom/config/$dir/"
+            fi
+          done
+          if [ -d armbian-custom/custom/packages ]; then
+            mkdir -p custom/packages
+            rsync -a armbian-custom/custom/packages/ custom/packages/
+          fi
+          if [ -d armbian-custom/custom/extensions ]; then
+            mkdir -p custom/extensions
+            rsync -a armbian-custom/custom/extensions/ custom/extensions/
+          fi
+
+          if [ -d armbian-custom/userpatches ]; then
+            mkdir -p custom/userpatches
+            rsync -a armbian-custom/userpatches/ custom/userpatches/
+          fi
+          if [ -d armbian-custom/custom/userpatches ]; then
+            mkdir -p custom/userpatches
+            rsync -a armbian-custom/custom/userpatches/ custom/userpatches/
+          fi
+          for lib_file in rootfs/rootfs-create.sh rootfs/apt-install.sh; do
+            if [ -f "armbian-custom/lib/functions/$lib_file" ]; then
+              mkdir -p "custom/lib/functions/$(dirname "$lib_file")"
+              cp "armbian-custom/lib/functions/$lib_file" "custom/lib/functions/$lib_file"
+            fi
+          done
+
+          # Synchronize the staged customizations into the cloned framework.
+          for dir in config patch packages extensions; do
+            mkdir -p "$dir"
+            rsync -a "custom/$dir/" "$dir/"
+          done
+          mkdir -p userpatches
+          if [ -d os/userpatches ]; then
+            rsync -a os/userpatches/ userpatches/
+          fi
+          if [ -d custom/userpatches ]; then
+            rsync -a custom/userpatches/ userpatches/
+          fi
+          if [ -d custom/lib ]; then
+            rsync -a custom/lib/ lib/
+          fi
+          if [ -d custom/blobs ]; then
+            mkdir -p blobs
+            rsync -a custom/blobs/ blobs/
+          fi
+
+          # The upstream kernel fork already contains the RK817 support.
+          rm -fv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+
+          test -f config/boards/z96a-v2.conf
+          test -f config/kernel/linux-rockchip-rk3568-z96a-legacy.config
+          test -f patch/u-boot/legacy/board_z96a-v2/0003-add-full-uboot-commands.patch
+          test -f patch/u-boot/legacy/board_z96a-v2/0004-enable-gpio3-gpio4-i2c0-saradc.patch
+          test -f patch/kernel/rockchip-rk3568-z96a/legacy/0000.patching_config.yaml
+          test -f extensions/rockchip-multimedia.sh
+
+      - name: Verify complete customizations and accelerator inputs
+        run: |
+          set -euo pipefail
+          KCONFIG="config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
+          BOARD_CONFIG="config/boards/z96a-v2.conf"
+          RTL_PATCH="patch/kernel/rockchip-rk3568-z96a/legacy/0002-wifi-add-rtl8852bu-driver-for-z96a.patch"
+          UBOOT_PATCH="patch/u-boot/legacy/board_z96a-v2"
+          PATCH_CONFIG="patch/kernel/rockchip-rk3568-z96a/legacy/0000.patching_config.yaml"
+          CHARGER="patch/kernel/rockchip-rk3568-z96a/legacy/drivers/power/supply/sc8886s_charger.c"
+          MULTIMEDIA="extensions/rockchip-multimedia.sh"
+
           test -f "$KCONFIG"
           test -f "$BOARD_CONFIG"
           test -f "$RTL_PATCH"
+          test -f "$PATCH_CONFIG"
+          test -f "$CHARGER"
+          test -f "$MULTIMEDIA"
+          test -f "$UBOOT_PATCH/0003-add-full-uboot-commands.patch"
+          test -f "$UBOOT_PATCH/0004-enable-gpio3-gpio4-i2c0-saradc.patch"
+          test -f packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin
+          test -f packages/blobs/rk35/rk3568_bl31_v1.43.elf
+
           grep -qx 'CONFIG_USB_USBNET=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_NET_AX88179_178A=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_NET_CDCETHER=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_RTL8152=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_RTL8153_ECM=y' "$KCONFIG"
           grep -qx 'CONFIG_RTL8852BU=m' "$KCONFIG"
+          grep -qx 'CONFIG_MALI_BIFROST=y' "$KCONFIG"
+          grep -qx 'CONFIG_MALI_CSF_SUPPORT=y' "$KCONFIG"
+          grep -qx 'CONFIG_DMABUF_HEAPS_ROCKCHIP=y' "$KCONFIG"
+          grep -qx 'CONFIG_DMABUF_HEAPS_ROCKCHIP_CMA_HEAP=y' "$KCONFIG"
+          grep -qx 'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP=y' "$KCONFIG"
           grep -q 'CONFIG_USB_NET_AX88179_178A' "$BOARD_CONFIG"
           grep -q 'CONFIG_RTL8852BU' "$BOARD_CONFIG"
           grep -qi '0x0*b832' "$RTL_PATCH"
           grep -qi '0x0*b833' "$RTL_PATCH"
           grep -q 'MODULE_NAME = 8852bu' "$RTL_PATCH"
-          echo 'USB Ethernet and RTL8832BU build inputs verified'
+          test ! -e patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+          echo 'Complete customizations and accelerator inputs verified'
 
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v1.3.1
@@ -447,7 +503,10 @@ jobs:
 
       - name: Setup Armbian version
         run: |
-          echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+          set -euo pipefail
+          ARMBIAN_VERSION="$(python3 -c 'import json; print(json.load(open("os/stable.json"))["version"])')"
+          echo "ARMBIAN_VERSION=$ARMBIAN_VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=$(date +%Y%m%d)" >> "$GITHUB_ENV"
 
       - name: Apply custom config & patches
         run: |
@@ -526,6 +585,13 @@ jobs:
           # DESKTOP_ENVIRONMENT picks the actual desktop.
           # BUILD_DESKTOP=<name> is silently ignored (no desktop installed,
           # filename gets no desktop tag), so translate the UI choice here.
+          # Armbian calls its image build target "build"; keep the workflow's
+          # existing user-facing "image" value as an alias.
+          TARGET="${{ github.event.inputs.armbian_target }}"
+          if [ "$TARGET" = "image" ]; then
+            TARGET="build"
+          fi
+
           UI="${{ github.event.inputs.armbian_ui }}"
           case "$UI" in
             xfce|kde|gnome|cinnamon)
@@ -545,7 +611,8 @@ jobs:
               ;;
           esac
 
-          ./compile.sh \
+          ./compile.sh "$TARGET" \
+            REVISION="$ARMBIAN_VERSION" \
             BOARD=z96a-v2 \
             BRANCH=${{ github.event.inputs.armbian_kernel_branch }} \
             RELEASE=${{ github.event.inputs.armbian_release }} \
@@ -559,9 +626,12 @@ jobs:
             CLEAN_LEVEL=make,debs \
             EXTERNAL=yes \
             EXTERNAL_NEW=pre-built \
-            INSTALL_HEADERS=no
+            INSTALL_HEADERS=no \
+            SHARE_LOG=yes \
+            EXPERT=yes
 
       - name: Verify Mali in output
+        if: github.event.inputs.armbian_target != 'kernel'
         run: |
           find output/ -name "*mali*" -o -name "*libMali*" | head -20
           find output/ -name "*.img" -o -name "*.img.xz" -o -name "*.img.gz" | head -10
@@ -571,7 +641,7 @@ jobs:
 
       - name: Release
         uses: softprops/action-gh-release@v1
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.armbian_target != 'kernel'
         with:
           tag_name: armbian-z96a-${{ github.event.inputs.armbian_release }}-${{ github.run_number }}
           name: Armbian Z96A Mali G52 ${{ github.event.inputs.armbian_release }} #${{ github.run_number }}
