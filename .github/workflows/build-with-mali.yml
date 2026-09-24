@@ -466,7 +466,7 @@ jobs:
           rm -rf /tmp/z96a-mali-package-check
           dpkg-deb --extract "$MALI_DEB" /tmp/z96a-mali-package-check
           LIBMALI="$(find /tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
-          test -n "$MIBMALI" -a -n "$LIBMALI"
+          test -n "$LIBMALI"
           readelf -h "$LIBMALI" | grep -E 'Class:|Machine:'
           for wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
             test -e "/tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl/$wrapper"
