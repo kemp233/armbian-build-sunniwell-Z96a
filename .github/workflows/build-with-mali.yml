@@ -523,12 +523,34 @@ jobs:
         env:
           MALI_REPO_PATH: ${{ env.MALI_REPO_PATH }}
         run: |
+          # Armbian framework needs both: BUILD_DESKTOP=yes is the switch,
+          # DESKTOP_ENVIRONMENT picks the actual desktop.
+          # BUILD_DESKTOP=<name> is silently ignored (no desktop installed,
+          # filename gets no desktop tag), so translate the UI choice here.
+          UI="${{ github.event.inputs.armbian_ui }}"
+          case "$UI" in
+            xfce|kde|gnome|cinnamon)
+              BUILD_DESKTOP=yes
+              DESKTOP_ENVIRONMENT="$UI"
+              BUILD_MINIMAL=no
+              ;;
+            minimal)
+              BUILD_DESKTOP=no
+              BUILD_MINIMAL=yes
+              ;;
+            *)
+              BUILD_DESKTOP=no
+              BUILD_MINIMAL=no
+              ;;
+          esac
+
           ./compile.sh \
             BOARD=z96a-v2 \
             BRANCH=${{ github.event.inputs.armbian_kernel_branch }} \
             RELEASE=${{ github.event.inputs.armbian_release }} \
-            BUILD_DESKTOP=${{ github.event.inputs.armbian_ui }} \
-            BUILD_MINIMAL=no \
+            BUILD_DESKTOP="$BUILD_DESKTOP" \
+            DESKTOP_ENVIRONMENT="$DESKTOP_ENVIRONMENT" \
+            BUILD_MINIMAL="$BUILD_MINIMAL" \
             KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha,gpg,xz \
             CLEAN_LEVEL=make,debs \
