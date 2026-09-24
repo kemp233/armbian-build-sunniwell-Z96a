@@ -532,6 +532,8 @@ jobs:
             xfce|kde|gnome|cinnamon)
               BUILD_DESKTOP=yes
               DESKTOP_ENVIRONMENT="$UI"
+              DESKTOP_ENVIRONMENT_CONFIG_NAME="config_base"
+              DESKTOP_APPGROUPS_SELECTED=""
               BUILD_MINIMAL=no
               ;;
             minimal)
@@ -550,6 +552,8 @@ jobs:
             RELEASE=${{ github.event.inputs.armbian_release }} \
             BUILD_DESKTOP="$BUILD_DESKTOP" \
             DESKTOP_ENVIRONMENT="$DESKTOP_ENVIRONMENT" \
+            DESKTOP_ENVIRONMENT_CONFIG_NAME="$DESKTOP_ENVIRONMENT_CONFIG_NAME" \
+            DESKTOP_APPGROUPS_SELECTED="$DESKTOP_APPGROUPS_SELECTED" \
             BUILD_MINIMAL="$BUILD_MINIMAL" \
             KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha,gpg,xz \
