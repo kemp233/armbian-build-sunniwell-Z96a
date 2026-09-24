@@ -530,7 +530,7 @@ jobs:
             BUILD_DESKTOP=${{ github.event.inputs.armbian_ui }} \
             BUILD_MINIMAL=yes \
             KERNEL_CONFIGURE=no \
-            COMPRESS_OUTPUTIMAGE=sha,gpg \
+            COMPRESS_OUTPUTIMAGE=sha,gpg,xz \
             CLEAN_LEVEL=make,debs \
             EXTERNAL=yes \
             EXTERNAL_NEW=pre-built \
