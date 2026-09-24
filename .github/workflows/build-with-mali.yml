@@ -432,6 +432,9 @@ jobs:
           if [ -f packages/bsp/common/usr/lib/armbian/armbian-apt-updates ]; then
             chmod +x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
           fi
+          if [ -f packages/blobs/splash/bootsplash-packer ]; then
+            chmod +x packages/blobs/splash/bootsplash-packer
+          fi
 
           # The upstream kernel fork already contains the RK817 support.
           rm -fv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
@@ -465,6 +468,7 @@ jobs:
           test -f packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin
           test -f packages/blobs/rk35/rk3568_bl31_v1.43.elf
           test -x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
+          test -x packages/blobs/splash/bootsplash-packer
 
           grep -qx 'CONFIG_USB_USBNET=y' "$KCONFIG"
           grep -qx 'CONFIG_USB_NET_AX88179_178A=y' "$KCONFIG"
