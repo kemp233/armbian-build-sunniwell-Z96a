@@ -326,7 +326,11 @@ function pre_customize_image__rockchip_multimedia_install() {
 
 	local mali_repo="${MALI_REPO_PATH:-}"
 	if [[ -z "${mali_repo}" || ! -d "${mali_repo}" ]]; then
-		for _mali_candidate in "${SRC:-}/mali-repo" /armbian/mali-repo; do
+		for _mali_candidate in \
+			"${SRC:-}/custom/mali-repo" \
+			/armbian/custom/mali-repo \
+			"${SRC:-}/mali-repo" \
+			/armbian/mali-repo; do
 			if [[ -d "${_mali_candidate}" ]]; then
 				mali_repo="${_mali_candidate}"
 				break
