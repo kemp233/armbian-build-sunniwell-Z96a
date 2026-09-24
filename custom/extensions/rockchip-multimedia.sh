@@ -51,9 +51,9 @@ function _rmm_pinned_versions() {
 	EXT_VADRV_GIT="https://github.com/kleopatra999/rockchip-va-driver.git"
 	EXT_VADRV_REF="master"
 
-	# Mali-G52 (Bifrost, CSF) - INSTALLED VIA DEBS FROM WORKFLOW
-	# The workflow cross-compiles libmali and creates debs that are installed via install-mali.sh
-	# This extension only ensures the symlinks point to the Mali blob, not Mesa.
+	# Mali-G52 (Bifrost, CSF) is installed from the .deb produced by
+	# build-with-mali.yml during the formal pre_customize_image hook.
+	# This extension verifies the provider wrappers and their symlinks.
 	declare -g EXT_LIBMALI_GIT="https://github.com/tsukumijima/libmali-rockchip.git"
 	declare -g EXT_LIBMALI_REF="g52-g24p0-gbm"
 	declare -g EXT_LIBMALI_PLATFORM="gbm"
@@ -113,10 +113,11 @@ function post_family_config__rockchip_multimedia_gles_packages() {
 	_rmm_source_framework || return 1
 	_rmm_init
 
-	# Mali G52 provides EGL/GLES3.2/OpenCL via debs installed by workflow
-	# libegl1, libgles2 are provided by Mali deb (libmali-bifrost-g52-g24p0-gbm)
-	# libgl1-mesa-dri provides GLX/swrast for X11 fallback
-	add_packages_to_image libegl1 libgles2 libgl1-mesa-dri libva2 libva-drm2 vainfo glmark2-es2 ethtool
+	# Mali G52 provides EGL/GLES3.2/GBM through the package produced by
+	# build-with-mali.yml. Keep Mesa's desktop GLX fallback available for
+	# X11 desktops, and add the tools/regulatory data used to verify USB
+	# Ethernet and USB Wi-Fi/Bluetooth devices.
+	add_packages_to_image libegl1 libgles2 libgl1-mesa-dri libva2 libva-drm2 vainfo glmark2-es2 mesa-utils-extra ethtool iw wireless-regdb bluez
 }
 
 # ============================================================ MPP --
@@ -323,7 +324,29 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rmm_source_framework || return 1
 	_rmm_init
 
-	display_alert "rockchip-multimedia" "installing MPP + librga + RKNN + VA-API backend (Mali G52 via debs)" "info"
+	local mali_repo="${MALI_REPO_PATH:-}"
+	if [[ -z "${mali_repo}" || ! -d "${mali_repo}" ]]; then
+		for _mali_candidate in "${SRC:-}/mali-repo" /armbian/mali-repo; do
+			if [[ -d "${_mali_candidate}" ]]; then
+				mali_repo="${_mali_candidate}"
+				break
+			fi
+		done
+	fi
+	if [[ -z "${mali_repo}" || ! -d "${mali_repo}" ]]; then
+		exit_with_error "rockchip-multimedia: Mali repository directory is not available"
+	fi
+
+	local mali_deb
+	mali_deb="$(find "${mali_repo}" -maxdepth 1 -type f -name 'libmali-*.deb' -print -quit)"
+	if [[ -z "${mali_deb}" || ! -s "${mali_deb}" ]]; then
+		exit_with_error "rockchip-multimedia: no non-empty Mali package found in ${mali_repo}"
+	fi
+
+	display_alert "rockchip-multimedia" "installing Mali package: ${mali_deb}" "info"
+	install_deb_chroot "${mali_deb}"
+
+	display_alert "rockchip-multimedia" "installing MPP + librga + RKNN + VA-API backend" "info"
 
 	_rockchip_multimedia_build_mpp
 	_rockchip_multimedia_build_rga
@@ -333,41 +356,31 @@ function pre_customize_image__rockchip_multimedia_install() {
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
 
-# NOTE: this used to be a customize_image__ hook, but the framework only
-# honours the first customize_image definition and logs
-# "Extension conflict ... ignoring functions: customize_image__rockchip_..."
-# for ours, so the symlinks never got created.  It is now called from the
-# pre_umount_final_image verify hook, which runs after every other hook.
+# NOTE: the first customize_image definition wins, so symlink setup runs from
+# the final pre-umount hook below after the Mali package has been installed.
 function _rockchip_multimedia_setup_mali_symlinks() {
-	display_alert "rockchip-multimedia" "setting up Mali G52 EGL/GLES/GBM/OpenCL symlinks" "info"
+	display_alert "rockchip-multimedia" "configuring Mali G52 EGL/GLES/GBM providers" "info"
 
-	# Ensure Mali symlinks point to libmali wrapper, not Mesa
-	# These are installed by the workflow's install-mali.sh via pre-customize hook
+	local mali_lib_dir="${lib_dir}/mali-egl"
+	for _wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
+		if [[ ! -e "${SDCARD}/${mali_lib_dir}/${_wrapper}" ]]; then
+			exit_with_error "rockchip-multimedia: Mali wrapper missing: /${mali_lib_dir}/${_wrapper}"
+		fi
+		ln -sf "mali-egl/${_wrapper}" "${SDCARD}/${lib_dir}/${_wrapper}"
+	done
 
-	# libEGL
-	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libEGL.so.1"
-	ln -sf libEGL.so.1 "${SDCARD}/${lib_dir}/libEGL.so"
+	# OpenCL support is chip/blob dependent and is not required for the desktop.
+	if [[ -e "${SDCARD}/${mali_lib_dir}/libOpenCL.so.1" ]]; then
+		ln -sf "mali-egl/libOpenCL.so.1" "${SDCARD}/${lib_dir}/libOpenCL.so.1"
+	fi
 
-	# libGLESv2
-	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libGLESv2.so.2"
-	ln -sf libGLESv2.so.2 "${SDCARD}/${lib_dir}/libGLESv2.so"
-
-	# libgbm
-	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libgbm.so.1"
-	ln -sf libgbm.so.1 "${SDCARD}/${lib_dir}/libgbm.so"
-
-	# libOpenCL
-	ln -sf libmali-bifrost-g52-g24p0-gbm.so "${SDCARD}/${lib_dir}/libOpenCL.so.1"
-	ln -sf libOpenCL.so.1 "${SDCARD}/${lib_dir}/libOpenCL.so"
-
-	# VA-API driver path
 	mkdir -p "${SDCARD}/etc/profile.d"
 	cat > "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" << 'EOF'
 export LIBVA_DRIVER_NAME=rkmpp
 export LIBVA_DRIVERS_PATH=/usr/lib/aarch64-linux-gnu/dri
 EOF
 
-	display_alert "rockchip-multimedia" "Mali G52 symlinks configured" "info"
+	display_alert "rockchip-multimedia" "Mali G52 providers configured" "info"
 }
 
 function pre_umount_final_image__rockchip_multimedia_verify() {
@@ -405,19 +418,26 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 		fi
 	done
 
-	# libEGL/libGLESv2/libgbm/libOpenCL must resolve to Mali wrappers, not Mesa
-	for _gl in libEGL.so.1 libGLESv2.so.2 libgbm.so.1 libOpenCL.so.1; do
+	# Runtime provider links must resolve inside the Mali package directory.
+	for _gl in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
 		if [[ ! -L "${SDCARD}/${lib_dir}/${_gl}" ]]; then
-			exit_with_error "rockchip-multimedia: /${lib_dir}/${_gl} is not a symlink to libmali wrapper"
+			exit_with_error "rockchip-multimedia: /${lib_dir}/${_gl} is not a Mali provider symlink"
 		fi
 		local _target
 		_target="$(readlink -f "${SDCARD}/${lib_dir}/${_gl}")"
-		if [[ "${_target}" != *libmali* ]] && [[ "${_target}" != *mali* ]]; then
-			exit_with_error "rockchip-multimedia: ${_gl} -> ${_target} (expected Mali wrapper)"
+		if [[ "${_target}" != *"${lib_dir}/mali-egl/"* ]]; then
+			exit_with_error "rockchip-multimedia: ${_gl} -> ${_target} (expected Mali provider)"
 		fi
 	done
 
-	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + Mali G52 GLES + VA-API backend installed" "info"
+	# Reject Meson's small dummy library. The real G52 g24p0 blob is tens of MB.
+	local _mali_core
+	_mali_core="$(find "${SDCARD}/${lib_dir}/mali-egl" -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
+	if [[ -z "${_mali_core}" ]]; then
+		exit_with_error "rockchip-multimedia: real Mali G52 blob missing or implausibly small"
+	fi
+	display_alert "rockchip-multimedia" "verified Mali core: ${_mali_core} ($(stat -c '%s' "${_mali_core}") bytes)" "info"
+	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + Mali G52 EGL/GLES/GBM installed" "info"
 	display_alert "rockchip-multimedia" "on-device checks: vainfo, mpi_dec_test, glmark2-es2; firefox about:support should show HW decode" "info"
 	return 0
 }

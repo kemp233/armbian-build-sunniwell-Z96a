@@ -174,7 +174,7 @@ jobs:
           meson setup builddir --cross-file /tmp/cross-file.txt \
             --prefix=/usr \
             --libdir=lib/aarch64-linux-gnu \
-            -Dplatform=gbm \
+            -Dplatform=${{ inputs.mali_platform }} \
             -Dwerror=false
 
       - name: Build with Ninja
@@ -184,92 +184,87 @@ jobs:
         run: |
           ninja -C builddir
 
-      - name: Verify build artifacts
+      - name: Stage installed Mali userspace
+        working-directory: libmali-rockchip
+        env:
+          PKG_CONFIG_PATH: "/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
+        run: |
+          set -euo pipefail
+          rm -rf mali-stage
+          DESTDIR="$PWD/mali-stage" meson install -C builddir --no-rebuild
+          find mali-stage -maxdepth 5 -type f -o -type l | sort
+
+      - name: Verify Mali build and installed wrappers
         working-directory: libmali-rockchip
         run: |
-          echo "=== Build directory contents ==="
-          ls -la builddir/
-          echo "=== All .so files ==="
-          find builddir -name "*.so*" -type f | head -30
-          if [ -f builddir/libMali.so ] || [ -f builddir/libmali.so.1.9.0 ]; then
-            echo "Found Mali libraries in builddir/"
-          else
-            echo "ERROR: Mali libraries not found!"
+          set -euo pipefail
+          STAGE_LIB_DIR="mali-stage/usr/lib/aarch64-linux-gnu"
+          LIBMALI="$(find "$STAGE_LIB_DIR" -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
+          if [ -z "$LIBMALI" ]; then
+            echo "ERROR: real Mali G52 blob missing or smaller than 10 MiB"
+            find "$STAGE_LIB_DIR" -maxdepth 1 -printf '%y %s %p\n' | sort
             exit 1
           fi
+          aarch64-linux-gnu-readelf -h "$LIBMALI" | grep -E 'Class:|Machine:'
+          for wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
+            test -e "$STAGE_LIB_DIR/$wrapper"
+            aarch64-linux-gnu-readelf -h "$STAGE_LIB_DIR/$wrapper" >/dev/null
+          done
+          echo "Verified real Mali library: $LIBMALI ($(stat -c '%s' "$LIBMALI") bytes)"
 
-      - name: Create Debian packages manually (skip debian/rules meson re-run)
+      - name: Create Debian package from installed Mali userspace
         id: package
         working-directory: libmali-rockchip
         run: |
-          set -e
+          set -euo pipefail
           VERSION="1.${{ inputs.mali_version }}-gbm"
           GPU="${{ inputs.mali_gpu }}"
           PLATFORM="${{ inputs.mali_platform }}"
-          
           ARTIFACT_NAME="libmali-${GPU}-${VERSION}-${PLATFORM}-aarch64"
-          echo "artifact-name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
-          
+          echo "artifact-name=${ARTIFACT_NAME}" >> "$GITHUB_OUTPUT"
+
+          STAGE_LIB_DIR="mali-stage/usr/lib/aarch64-linux-gnu"
           PKG_DIR="${ARTIFACT_NAME}"
           rm -rf "${PKG_DIR}"
-          mkdir -p "${PKG_DIR}/DEBIAN"
-          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
-          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl"
-          mkdir -p "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm"
-          
-          LIBMALI_SRC=""
-          if [ -f builddir/libMali.so ]; then
-            LIBMALI_SRC="builddir/libMali.so"
-          elif [ -f builddir/libmali.so.1.9.0 ]; then
-            LIBMALI_SRC="builddir/libmali.so.1.9.0"
-          else
-            echo "ERROR: Cannot find libMali.so"
-            find builddir -name "*.so*" -type f
-            exit 1
-          fi
-          
-          echo "Using library: ${LIBMALI_SRC}"
-          # Create versioned library name that extension expects
-          VERSIONED_NAME="libmali-bifrost-g52-g24p0-gbm.so"
-          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/${VERSIONED_NAME}"
-          cp "${LIBMALI_SRC}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-gbm/${VERSIONED_NAME}"
-          
-          cd "${PKG_DIR}/usr/lib/aarch64-linux-gnu"
-          ln -sf mali-egl/${VERSIONED_NAME} libMali.so
-          ln -sf libMali.so libmali.so
-          ln -sf libMali.so libEGL.so
-          ln -sf libMali.so libEGL.so.1
-          ln -sf libMali.so libGLESv2.so
-          ln -sf libMali.so libGLESv2.so.2
-          ln -sf libMali.so libgbm.so
-          ln -sf libMali.so libgbm.so.1
-          
-          cd /home/runner/work/armbian-build-sunniwell-Z96a/armbian-build-sunniwell-Z96a/libmali-rockchip
-          
+          mkdir -p "${PKG_DIR}/DEBIAN" \
+                   "${PKG_DIR}/etc/ld.so.conf.d" \
+                   "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl"
+
+          shopt -s nullglob
+          for lib in "${STAGE_LIB_DIR}"/*.so*; do
+            mv "${lib}" "${PKG_DIR}/usr/lib/aarch64-linux-gnu/mali-egl/"
+          done
+          shopt -u nullglob
+
+          printf '%s\n' /usr/lib/aarch64-linux-gnu/mali-egl \
+            > "${PKG_DIR}/etc/ld.so.conf.d/00-z96a-mali.conf"
+
           cat > "${PKG_DIR}/DEBIAN/control" << CONTROL
           Package: ${ARTIFACT_NAME}
           Version: ${VERSION}
           Architecture: arm64
           Maintainer: Armbian Build <build@armbian.com>
+          Provides: libmali
+          Conflicts: libmali
+          Replaces: libmali
           Description: Mali GPU userspace drivers for ${GPU} (${PLATFORM})
-           This package contains the Mali GPU userspace drivers for Rockchip RK3568
-           (Mali G52 bifrost) built for GBM platform.
+           This package contains the Rockchip Mali G52 user-space libraries and
+           EGL, GLES and GBM provider wrappers used by the Z96A image.
           Section: libs
           Priority: optional
-          Depends: libc6 (>= 2.31), libdrm2, libgbm1
+          Depends: libc6, libdrm2, libgbm1, libglvnd0
           CONTROL
-          
+
           cat > "${PKG_DIR}/DEBIAN/postinst" << 'POSTINST'
           #!/bin/sh
           set -e
           ldconfig
           POSTINST
           chmod 755 "${PKG_DIR}/DEBIAN/postinst"
-          
-          dpkg-deb --build "${PKG_DIR}"
-          
-          dpkg-deb -I "${PKG_DIR}.deb"
-          dpkg-deb -c "${PKG_DIR}.deb"
+
+          dpkg-deb --root-owner-group --build "${PKG_DIR}"
+          dpkg-deb --info "${PKG_DIR}.deb"
+          dpkg-deb --contents "${PKG_DIR}.deb"
 
       - name: Package artifacts for Armbian job
         working-directory: libmali-rockchip
@@ -405,6 +400,28 @@ jobs:
           ls -la custom/
           ls -la extensions/ 2>/dev/null || true
 
+      - name: Verify USB Ethernet and RTL8832BU build inputs
+        run: |
+          set -euo pipefail
+          KCONFIG="z96a-repo/custom/config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
+          BOARD_CONFIG="z96a-repo/config/boards/z96a-v2.conf"
+          RTL_PATCH="z96a-repo/patch/kernel/rockchip-rk3568-z96a/legacy/0002-wifi-add-rtl8852bu-driver-for-z96a.patch"
+          test -f "$KCONFIG"
+          test -f "$BOARD_CONFIG"
+          test -f "$RTL_PATCH"
+          grep -qx 'CONFIG_USB_USBNET=y' "$KCONFIG"
+          grep -qx 'CONFIG_USB_NET_AX88179_178A=y' "$KCONFIG"
+          grep -qx 'CONFIG_USB_NET_CDCETHER=y' "$KCONFIG"
+          grep -qx 'CONFIG_USB_RTL8152=y' "$KCONFIG"
+          grep -qx 'CONFIG_USB_RTL8153_ECM=y' "$KCONFIG"
+          grep -qx 'CONFIG_RTL8852BU=m' "$KCONFIG"
+          grep -q 'CONFIG_USB_NET_AX88179_178A' "$BOARD_CONFIG"
+          grep -q 'CONFIG_RTL8852BU' "$BOARD_CONFIG"
+          grep -qi '0x0*b832' "$RTL_PATCH"
+          grep -qi '0x0*b833' "$RTL_PATCH"
+          grep -q 'MODULE_NAME = 8852bu' "$RTL_PATCH"
+          echo 'USB Ethernet and RTL8832BU build inputs verified'
+
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
@@ -439,36 +456,21 @@ jobs:
             done
           fi
 
-      - name: Inject Mali repo & install hook
+      - name: Verify Mali package for image build
         run: |
-          # Create local repo configuration for Mali packages
-          cat > config/sources/mali-repo.list << 'SOURCES'
-          deb [trusted=yes] file://${MALI_REPO_PATH} ./
-          SOURCES
-          
-          # Create install hook for Mali packages
-          mkdir -p custom/hooks
-          cat > custom/hooks/install-mali.sh << 'HOOK'
-          #!/bin/bash
-          # Install Mali G52 packages during Armbian build
-          set -e
-          
-          echo "Installing Mali G52 packages..."
-          
-          apt-get update
-          
-          apt-get install -y --allow-unauthenticated \
-            libmali-bifrost-g52-g24p0-gbm-aarch64
-          
-          # The package installs libmali-bifrost-g52-g24p0-gbm.so
-          # Set up update-alternatives to point to it
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libEGL.so libEGL.so /usr/lib/aarch64-linux-gnu/mali-egl/libmali-bifrost-g52-g24p0-gbm.so 100
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libGLESv2.so libGLESv2.so /usr/lib/aarch64-linux-gnu/mali-egl/libmali-bifrost-g52-g24p0-gbm.so 100
-          update-alternatives --install /usr/lib/aarch64-linux-gnu/libgbm.so libgbm.so /usr/lib/aarch64-linux-gnu/mali-gbm/libmali-bifrost-g52-g24p0-gbm.so 100
-          
-          echo "Mali G52 packages installed successfully"
-          HOOK
-          chmod +x custom/hooks/install-mali.sh
+          set -euo pipefail
+          MALI_DEB="$(find mali-repo -maxdepth 1 -type f -name 'libmali-*.deb' -print -quit)"
+          test -n "$MALI_DEB"
+          test -s "$MALI_DEB"
+          dpkg-deb --info "$MALI_DEB"
+          rm -rf /tmp/z96a-mali-package-check
+          dpkg-deb --extract "$MALI_DEB" /tmp/z96a-mali-package-check
+          LIBMALI="$(find /tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
+          test -n "$MIBMALI" -a -n "$LIBMALI"
+          readelf -h "$LIBMALI" | grep -E 'Class:|Machine:'
+          for wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
+            test -e "/tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl/$wrapper"
+          done
 
       - name: Configure apt sources for ARM64 (native runner)
         run: |
@@ -513,11 +515,6 @@ jobs:
             sleep 10
           done
           sudo apt-get install -y cmake build-essential pkg-config git
-
-      - name: Install Mali packages via hook (pre-customize)
-        run: |
-          echo "Mali install hook prepared at custom/hooks/install-mali.sh"
-          ls -la custom/hooks/
 
       - name: Build Armbian image
         env:
