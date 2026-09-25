@@ -96,8 +96,14 @@ jobs:
 
       - name: Install cross-compilation toolchain & deps
         run: |
-          sudo apt-get install -y \
-            crossbuild-essential-arm64 \
+          # security.ubuntu.com round-robins between backends that briefly
+          # disagree on freshly published packages, which surfaces as a 404
+          # on a perfectly valid version. Retry the whole update+install
+          # cycle so a retry re-resolves consistent indexes.
+          for attempt in 1 2 3; do
+            sudo apt-get update \
+              && sudo apt-get install -y -o Acquire::Retries=5 \
+                crossbuild-essential-arm64 \
             pkg-config \
             libdrm-dev:arm64 \
             libgbm-dev:arm64 \
@@ -127,17 +133,28 @@ jobs:
             dpkg-dev \
             debhelper \
             dh-make \
-            devscripts
+                devscripts \
+              && exit 0
+            echo "::warning::apt-get install failed (attempt $attempt/3), retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Install native build dependencies (for dpkg-buildpackage)
         run: |
-          sudo apt-get install -y \
-            build-essential \
-            debhelper \
-            dh-make \
-            devscripts \
-            equivs \
-            lintian
+          for attempt in 1 2 3; do
+            sudo apt-get install -y -o Acquire::Retries=5 \
+              build-essential \
+              debhelper \
+              dh-make \
+              devscripts \
+              equivs \
+              lintian \
+              && exit 0
+            echo "::warning::apt-get install failed (attempt $attempt/3), retrying in 20s"
+            sleep 20
+          done
+          exit 1
 
       - name: Verify pkg-config for cross-compile
         run: |
@@ -585,7 +602,16 @@ jobs:
             echo "apt-get update failed, retrying in 10 seconds... (attempt $i/3)"
             sleep 10
           done
-          sudo apt-get install -y cmake build-essential pkg-config git
+          install_ok=0
+          for i in 1 2 3; do
+            if sudo apt-get install -y cmake build-essential pkg-config git; then
+              install_ok=1
+              break
+            fi
+            echo "apt-get install failed, retrying in 10 seconds... (attempt $i/3)"
+            sleep 10
+          done
+          [ "$install_ok" = 1 ] || exit 1
 
       - name: Build Armbian image
         env:
