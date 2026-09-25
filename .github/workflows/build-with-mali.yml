@@ -38,8 +38,8 @@ on:
       mali_platform:
         description: 'Mali platform'
         type: choice
-        options: [gbm, wayland-gbm, x11-gbm]
-        default: wayland-gbm
+        options: [x11-gbm, gbm, wayland-gbm]
+        default: x11-gbm
 
 permissions:
   contents: write
