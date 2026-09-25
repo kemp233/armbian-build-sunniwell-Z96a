@@ -445,13 +445,20 @@ jobs:
             rsync -a custom/blobs/ blobs/
           fi
 
-          # Artifact downloads do not preserve Unix executable bits.
-          if [ -f packages/bsp/common/usr/lib/armbian/armbian-apt-updates ]; then
-            chmod +x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
-          fi
-          if [ -f packages/blobs/splash/bootsplash-packer ]; then
-            chmod +x packages/blobs/splash/bootsplash-packer
-          fi
+          # GitHub artifacts do not preserve Unix permission bits. Restore the
+          # executable bit on every file git marks as 0755, using the z96a-repo
+          # checkout as the reference. Without this, /etc/initramfs/post-update.d/99-uboot
+          # lands in the bsp-cli package as 0644, run-parts silently skips it,
+          # /boot/uInitrd is never created, and the board drops to the U-Boot
+          # prompt with "Wrong Ramdisk Image Format" (boot failed err=-14).
+          cd "$GITHUB_WORKSPACE/z96a-repo"
+          git ls-files -s | awk '$1=="100755"{print $4}' | while IFS= read -r f; do
+            if [ -f "../$f" ]; then
+              chmod 755 "../$f"
+              echo "restored exec bit: $f"
+            fi
+          done
+          cd "$GITHUB_WORKSPACE"
 
           # The upstream kernel fork already contains the RK817 support.
           rm -fv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
