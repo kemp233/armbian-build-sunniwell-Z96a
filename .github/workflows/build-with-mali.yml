@@ -39,7 +39,7 @@ on:
         description: 'Mali platform'
         type: choice
         options: [gbm, wayland-gbm, x11-gbm]
-        default: gbm
+        default: wayland-gbm
 
 permissions:
   contents: write
