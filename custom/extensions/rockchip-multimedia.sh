@@ -48,7 +48,9 @@ function _rmm_pinned_versions() {
 	EXT_RGA_REF="v1.10.0"
 	EXT_RKNN_GIT="https://github.com/rockchip-linux/rknn-toolkit2.git"
 	EXT_RKNN_REF="v1.6.0"  # latest release tag
-	EXT_VADRV_GIT="https://github.com/kleopatra999/rockchip-va-driver.git"
+	# VA 驱动: woodyst/rockchip-vaapi 通过 MPP 实现完整硬件解码 (H264/HEVC/VP9),
+	# 注册 VAEntrypointVLD 解码入口; 旧 kleopatra999 版只有编码.
+	EXT_VADRV_GIT="https://github.com/woodyst/rockchip-vaapi.git"
 	EXT_VADRV_REF="master"
 
 	# Mali-G52 (Bifrost, CSF) is installed from the .deb produced by
@@ -281,16 +283,14 @@ function _rockchip_multimedia_build_vaapi() {
 
 	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}" || return 1
 
-	# kleopatra999/rockchip-va-driver uses autotools (autogen.sh), not cmake.
-	# It needs libva's headers + pkg-config file on the *build* host.
+	# woodyst/rockchip-vaapi: VA-API -> MPP 桥接, 注册 VLD 解码 (H264/HEVC/VP9).
+	# 依赖 libva 头文件 + librockchip_mpp (上一步已装).
 	if ! pkg-config --exists libva 2>/dev/null; then
 		display_alert "rockchip-multimedia" "installing libva dev package for VA-API build" "info"
 		apt-get -qq update -y && apt-get -qq install -y libva-dev
 	fi
 
-	# The driver links against librkenc-h264e and friends, which come from
-	# the MPP step we just ran.  Point the linker and pkg-config at the
-	# staged tree so configure/make can see them.
+	# MPP 库已 staged, 链接时指过去
 	local mpp_stage="${work_dir}/stage/mpp"
 	if [[ -d "${mpp_stage}${prefix}/${lib_dir}" ]]; then
 		export LIBRARY_PATH="${mpp_stage}${prefix}/${lib_dir}:${LIBRARY_PATH:-}"
@@ -299,23 +299,15 @@ function _rockchip_multimedia_build_vaapi() {
 	fi
 
 	cd "${src_dir}"
-	# NOTE: rockchip-va-driver links against librkenc-h264e / librkenc-h265e,
-	# which are NOT produced by rockchip-linux/mpp (they come from a separate
-	# rockchip encoder package we do not build).  VA-API here is a convenience
-	# layer only - the primary video decode/encode path on Rockchip is MPP via
-	# librockchip_mpp, which we do install.  So a VA-API failure must not abort
-	# the whole image build.
-	if [[ -x ./autogen.sh ]]; then
-		if ./autogen.sh --prefix="${prefix}" --libdir="${prefix}/${lib_dir}" \
-			--enable-drm --disable-x11 2>&1 && \
-			make -j"$(nproc)" 2>&1; then
-			DESTDIR="${stage_dir}" make install 2>&1
-			rsync -av "${stage_dir}/" "${SDCARD}/"
-		else
-			display_alert "rockchip-multimedia" "VA-API driver build failed (missing librkenc-*); skipping - MPP remains the video path" "warn"
-		fi
+	# 目标名与旧驱动一致, 直接覆盖只有编码的 rockchip_drv_video.so
+	local va_out="rockchip_drv_video.so"
+	if make -j"$(nproc)" CC="${CC}" 2>&1; then
+		mkdir -p "${stage_dir}${prefix}/${lib_dir}/dri"
+		install -m 755 "${va_out}" "${stage_dir}${prefix}/${lib_dir}/dri/${va_out}"
+		rsync -av "${stage_dir}/" "${SDCARD}/"
+		display_alert "rockchip-multimedia" "VA-API decode driver installed (${va_out})" "info"
 	else
-		display_alert "rockchip-multimedia" "VA-API: no autogen.sh in ${src_dir}" "warn"
+		display_alert "rockchip-multimedia" "VA-API driver build failed; MPP remains the video path" "warn"
 	fi
 }
 
