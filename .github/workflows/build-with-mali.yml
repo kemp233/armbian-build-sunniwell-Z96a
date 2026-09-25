@@ -501,7 +501,7 @@ jobs:
           grep -qx 'CONFIG_USB_RTL8153_ECM=y' "$KCONFIG"
           grep -qx 'CONFIG_RTL8852BU=m' "$KCONFIG"
           grep -qx 'CONFIG_MALI_BIFROST=y' "$KCONFIG"
-          grep -qx 'CONFIG_MALI_CSF_SUPPORT=y' "$KCONFIG"
+          grep -qx '# CONFIG_MALI_CSF_SUPPORT is not set' "$KCONFIG"
           grep -qx 'CONFIG_DMABUF_HEAPS_ROCKCHIP=y' "$KCONFIG"
           grep -qx 'CONFIG_DMABUF_HEAPS_ROCKCHIP_CMA_HEAP=y' "$KCONFIG"
           grep -qx 'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP=y' "$KCONFIG"
