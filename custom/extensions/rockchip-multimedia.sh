@@ -307,6 +307,26 @@ function _rockchip_multimedia_build_vaapi() {
 		display_alert "rockchip-multimedia" "patched Makefile include path -> ${mpp_inc}" "info"
 	fi
 
+	# woodyst/rockchip-vaapi 面向 libva 2.x (VA-API 1.20), Debian bookworm 是 libva 1.17:
+	#   1. VAProfileH264High10 枚举在 libva 1.17 里不存在 (2.x 才加), 编译报 undeclared.
+	#      用一个不冲突的占位值 (0x1000), 让 case 分支编过去; RK3568 硬件没有 High10 解码,
+	#      占位值不会真的被走到.
+	#      注意: 不能用 VAProfileH264StereoHigh+1, 那样会撞上 VAProfileHEVCMain=17 (duplicate case).
+	#   2. 驱动只导出 __vaDriverInit_1_20, 而 libva 1.17 dlopen 后找 __vaDriverInit_1_0,
+	#      "has no function __vaDriverInit_1_0" -> 加薄别名.
+	if ! grep -q "libva < 2.0 lacks High10" "${src_dir}/src/h264.h"; then
+		sed -i "/#include <va\/va.h>/a #include <va/va_compat.h>\n\n/* libva < 2.0 lacks High10 profile enum */\n#ifndef VAProfileH264High10\n#define VAProfileH264High10 (0x1000)\n#endif" "${src_dir}/src/h264.h"
+	fi
+	if ! grep -q "__vaDriverInit_1_0" "${src_dir}/src/rockchip_drv_video.c"; then
+		cat >> "${src_dir}/src/rockchip_drv_video.c" <<'VAEOF'
+
+/* libva < 2.0 (Debian bookworm = 1.17) looks up __vaDriverInit_1_0, but this
+ * driver only exports __vaDriverInit_1_20. Provide a thin alias. */
+extern VAStatus __vaDriverInit_1_20(VADriverContextP ctx);
+VAStatus __vaDriverInit_1_0(VADriverContextP ctx) { return __vaDriverInit_1_20(ctx); }
+VAEOF
+	fi
+
 	cd "${src_dir}"
 	# 目标名与旧驱动一致, 直接覆盖只有编码的 rockchip_drv_video.so
 	local va_out="rockchip_drv_video.so"
@@ -359,8 +379,74 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rockchip_multimedia_build_rga
 	_rockchip_multimedia_build_rknn
 	_rockchip_multimedia_build_vaapi
+	_rockchip_multimedia_setup_vdec_mpp_owner
 
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
+}
+
+# RK3568 rkvdec 被 staging 的 rockchip_vdec (V4L2) 和 mpp_rkvdec (MPP) 同时 claim.
+# 内核里 mpp_rkvdec 的 of_match 表是旧的 (只认 rk3328/rk3399/v1), 不含
+# rockchip,rkv-decoder-rk3568, 而 rockchip_vdec 有 rk3568 alias -> V4L2 抢先绑定,
+# MPP 拿不到设备, libva 报 "client 9 driver is not ready".
+# 修复: (1) blacklist rockchip_vdec; (2) dtb 里给 rkvdec 加 v1 compatible.
+function _rockchip_multimedia_setup_vdec_mpp_owner() {
+	# 1) 永久禁用 staging V4L2 驱动 (它和 MPP 抢同一个 fdf80200.rkvdec)
+	cat > "${SDCARD}/etc/modprobe.d/blacklist-rockchip-vdec.conf" <<'MODEOF'
+# rkvdec must be owned by the MPP framework (mpp_rkvdec) for libva/MPP decode.
+# The staging rockchip_vdec driver grabs fdf80200.rkvdec first and leaves MPP
+# with "client 9 driver is not ready".
+blacklist rockchip_vdec
+blacklist v4l2_h264
+blacklist v4l2_vp9
+MODEOF
+	display_alert "rockchip-multimedia" "blacklisted staging rockchip_vdec (MPP owns rkvdec)" "info"
+
+	# 2) dtb: rkvdec 加 rockchip,rkv-decoder-v1 (mpp_rkvdec 认的 compatible).
+	#    armbian 启动用 /boot/dtb/<fdtfile>, 不是 /boot/dtb-<kernel>/.
+	local dtb_glob="${SDCARD}/boot/dtb"
+	local fdtfile
+	fdtfile="$(grep -i '^fdtfile=' "${SDCARD}/boot/armbianEnv.txt" 2>/dev/null | cut -d= -f2 | tr -d ' \t\r' || true)"
+	if [[ -z "${fdtfile}" ]]; then
+		display_alert "rockchip-multimedia" "no fdtfile in armbianEnv.txt; skipping dtb rkvdec patch" "warn"
+		return 0
+	fi
+
+	local dtb="${dtb_glob}/${fdtfile}"
+	if [[ ! -f "${dtb}" ]]; then
+		display_alert "rockchip-multimedia" "dtb not found: ${dtb}" "warn"
+		return 0
+	fi
+	if ! command -v dtc >/dev/null 2>&1; then
+		display_alert "rockchip-multimedia" "dtc missing; skipping dtb rkvdec patch" "warn"
+		return 0
+	fi
+
+	# 已打过补丁就跳过
+	if dtc -I dtb -O dts "${dtb}" 2>/dev/null | grep -q "rkv-decoder-v1"; then
+		display_alert "rockchip-multimedia" "dtb already has rkv-decoder-v1" "info"
+		return 0
+	fi
+
+	local dts_tmp
+	dts_tmp="$(mktemp)"
+	dtc -I dtb -O dts "${dtb}" > "${dts_tmp}" 2>/dev/null
+	# compatible 字符串里的 \0 分隔符在 dts 里是字面 "\0"
+	sed -i 's|compatible = "rockchip,rkv-decoder-rk3568\\0rockchip,rkv-decoder-v2";|compatible = "rockchip,rkv-decoder-v1\\0rockchip,rkv-decoder-rk3568\\0rockchip,rkv-decoder-v2";|' "${dts_tmp}"
+
+	if dtc -I dtb -O dts "${dtb}" 2>/dev/null | grep -q "rkv-decoder-v1"; then
+		: # 已含
+	elif grep -q "rkv-decoder-v1" "${dts_tmp}"; then
+		cp "${dtb}" "${dtb}.bak"
+		if dtc -I dts -O dtb -o "${dtb}" "${dts_tmp}" 2>/dev/null; then
+			display_alert "rockchip-multimedia" "patched dtb: added rkv-decoder-v1 to ${fdtfile}" "info"
+		else
+			cp "${dtb}.bak" "${dtb}"
+			display_alert "rockchip-multimedia" "failed to recompile patched dtb; restored backup" "warn"
+		fi
+	else
+		display_alert "rockchip-multimedia" "rkvdec compatible string not found in ${fdtfile}; dtb not patched" "warn"
+	fi
+	rm -f "${dts_tmp}"
 }
 
 # NOTE: the first customize_image definition wins, so symlink setup runs from
