@@ -391,6 +391,7 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rockchip_multimedia_build_rknn
 	_rockchip_multimedia_build_vaapi
 	_rockchip_multimedia_setup_vdec_mpp_owner
+	_rockchip_multimedia_setup_gpu_access
 
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
@@ -458,6 +459,57 @@ MODEOF
 		display_alert "rockchip-multimedia" "rkvdec compatible string not found in ${fdtfile}; dtb not patched" "warn"
 	fi
 	rm -f "${dts_tmp}"
+}
+
+# GPU access for the closed-source Mali blob.
+#
+# The G52 userspace blob here is the ARM proprietary mali_kbase stack: the kernel
+# side is /dev/mali0 (mali_kbase does not implement DRM, so there is no GPU render
+# node) and the userspace side is libmali's own "armsoc" gbm backend. That backend
+# opens /dev/dma_heap/* from inside gbm_create_device().
+#
+# Two things block every non-root graphics session without this rule:
+#
+#   1. dma-heap nodes are created 0600 root:root and no distro rule opens them up.
+#      libmali's gbm_create_device() then gets EACCES on /dev/dma_heap/system and
+#      /dev/dma_heap/system-uncached. The errno left behind is ENOENT, from the
+#      "protected" heap it probes last and that does not exist, so mutter reports
+#      the confusing "Failed to create gbm device: No such file or directory" and
+#      the GDM greeter's Wayland session dies ("Session never registered").
+#   2. The GDM greeter runs as Debian-gdm, which is in neither video nor render and
+#      gets no uaccess ACL, so it cannot even open /dev/dri/card0.
+#
+# With both fixed the greeter logs "Created gbm renderer for '/dev/dri/card0'" and
+# comes up on Wayland ("Using Wayland display name 'wayland-0'").
+function _rockchip_multimedia_setup_gpu_access() {
+	display_alert "rockchip-multimedia" "granting video/render access to Mali gbm and /dev/dma_heap" "info"
+
+	# The Debian-gdm user only exists once gdm3 is installed; the gnome env pulls
+	# it in, but a bare desktop image may not have it yet.
+	local _gdm_user=Debian-gdm
+	if getent passwd "${_gdm_user}" >/dev/null; then
+		usermod -aG video,render "${_gdm_user}"
+	fi
+
+	# Any pre-existing interactive user, so a serial-console install can log in
+	# and get a GPU session without a manual usermod.
+	for _u in $(awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' "${SDCARD}/etc/passwd" 2>/dev/null); do
+		usermod -aG video,render "${_u}"
+	done
+
+	mkdir -p "${SDCARD}/etc/udev/rules.d"
+	cat > "${SDCARD}/etc/udev/rules.d/60-dma-heap-access.rules" <<'RULEOF'
+# libmali's armsoc gbm backend opens these heaps from gbm_create_device().
+# The kernel creates them 0600 root:root, so without this rule no non-root
+# graphics session (GDM greeter included) can build a gbm device.
+SUBSYSTEM=="dma_heap", KERNEL=="system|system-uncached|reserved", MODE="0660", GROUP="video"
+KERNEL=="dma_heap[0-9]*", MODE="0660", GROUP="video"
+RULEOF
+
+	# No gdm config here on purpose: the gnome desktop package ships
+	# packages/blobs/desktop/gdm/daemon.conf, which already pins
+	# WaylandEnable=true and the wayland greeter. gdm3 merges daemon.conf with
+	# custom.conf, so writing a second file here would only duplicate it.
 }
 
 # NOTE: the first customize_image definition wins, so symlink setup runs from
@@ -541,6 +593,13 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 		exit_with_error "rockchip-multimedia: real Mali G52 blob missing or implausibly small"
 	fi
 	display_alert "rockchip-multimedia" "verified Mali core: ${_mali_core} ($(stat -c '%s' "${_mali_core}") bytes)" "info"
+
+	# Without this rule the blob cannot build a gbm device as a normal user and
+	# the GDM greeter silently falls back to X11 with llvmpipe.
+	if [[ ! -f "${SDCARD}/etc/udev/rules.d/60-dma-heap-access.rules" ]]; then
+		exit_with_error "rockchip-multimedia: /etc/udev/rules.d/60-dma-heap-access.rules missing; Mali gbm will fail for non-root"
+	fi
+
 	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + Mali G52 EGL/GLES/GBM installed" "info"
 	display_alert "rockchip-multimedia" "on-device checks: vainfo, mpi_dec_test, glmark2-es2; firefox about:support should show HW decode" "info"
 	return 0
