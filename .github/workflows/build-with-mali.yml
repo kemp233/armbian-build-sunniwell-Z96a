@@ -495,6 +495,8 @@ jobs:
           PATCH_CONFIG="patch/kernel/rockchip-rk3568-z96a/legacy/0000.patching_config.yaml"
           CHARGER="patch/kernel/rockchip-rk3568-z96a/legacy/drivers/power/supply/sc8886s_charger.c"
           MULTIMEDIA="extensions/rockchip-multimedia.sh"
+          GDM_DAEMON_CONF="packages/blobs/desktop/gdm/daemon.conf"
+          GNOME_DESKTOP_PKG="config/desktop/buster/environments/gnome/armbian/create_desktop_package.sh"
 
           test -f "$KCONFIG"
           test -f "$BOARD_CONFIG"
@@ -502,6 +504,16 @@ jobs:
           test -f "$PATCH_CONFIG"
           test -f "$CHARGER"
           test -f "$MULTIMEDIA"
+          test -f "$GDM_DAEMON_CONF"
+          test -f "$GNOME_DESKTOP_PKG"
+          # The greeter only reaches the GPU if the image carries both the
+          # dma-heap rule and a wayland-first daemon.conf.
+          grep -q '60-dma-heap-access.rules' "$MULTIMEDIA"
+          grep -q '^WaylandEnable=true' "$GDM_DAEMON_CONF"
+          # gdm3 owns /etc/gdm3/daemon.conf. If the desktop package ever ships
+          # it again, dpkg refuses to unpack the package and the image build
+          # dies with Error 100, so catch it here instead.
+          ! grep -qE '^[^#]*(cp|install).*gdm3/daemon\.conf' "$GNOME_DESKTOP_PKG"
           test -f "$UBOOT_PATCH/0003-add-full-uboot-commands.patch"
           test -f "$UBOOT_PATCH/0004-enable-gpio3-gpio4-i2c0-saradc.patch"
           test -f packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin

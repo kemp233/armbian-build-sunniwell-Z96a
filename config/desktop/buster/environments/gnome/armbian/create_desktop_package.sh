@@ -1,13 +1,13 @@
 # gnome uses gdm3 as its display manager (pulled in by the gnome env
 # package list). Do NOT install the armbian lightdm blobs here: lightdm +
 # gdm3 both enabled causes greeter/session confusion.
-
-# Enable the wayland session explicitly: the Mali wayland-gbm blob only
-# provides the EGL wayland/gbm platforms, so an X11 gnome session would
-# composite with llvmpipe instead of the GPU.
-mkdir -p "${destination}"/etc/gdm3
-cp "${SRC}"/packages/blobs/desktop/gdm/daemon.conf "${destination}"/etc/gdm3/daemon.conf
-
+#
+# /etc/gdm3/daemon.conf must NOT be shipped from this package either. gdm3
+# already owns that path, so dpkg refuses to unpack the desktop package:
+#   trying to overwrite '/etc/gdm3/daemon.conf', which is also in package gdm3
+# and the whole image build aborts with Error 100. The Mali-specific
+# daemon.conf is therefore written straight into the rootfs by the
+# rockchip-multimedia extension, where no dpkg run is involved.
 # install default desktop settings
 mkdir -p "${destination}"/etc/skel
 cp -R "${SRC}"/packages/blobs/desktop/skel/. "${destination}"/etc/skel

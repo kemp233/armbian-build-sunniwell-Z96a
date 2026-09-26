@@ -479,23 +479,41 @@ MODEOF
 #   2. The GDM greeter runs as Debian-gdm, which is in neither video nor render and
 #      gets no uaccess ACL, so it cannot even open /dev/dri/card0.
 #
-# With both fixed the greeter logs "Created gbm renderer for '/dev/dri/card0'" and
-# comes up on Wayland ("Using Wayland display name 'wayland-0'").
+# And one thing has to be written into the rootfs rather than into a package:
+#
+#   3. gdm3 owns /etc/gdm3/daemon.conf, so the wayland-first version cannot ship
+#      inside the armbian-<release>-desktop-gnome .deb.
+#
+# With all three fixed the greeter logs "Created gbm renderer for '/dev/dri/card0'"
+# and comes up on Wayland ("Using Wayland display name 'wayland-0'").
 function _rockchip_multimedia_setup_gpu_access() {
 	display_alert "rockchip-multimedia" "granting video/render access to Mali gbm and /dev/dma_heap" "info"
 
-	# The Debian-gdm user only exists once gdm3 is installed; the gnome env pulls
-	# it in, but a bare desktop image may not have it yet.
+	# Group membership has to be edited *inside* the image. A bare `usermod`
+	# acts on the build host's accounts: Debian-gdm does not exist there, and
+	# with `set -e` still in effect the first such name aborts the build.
 	local _gdm_user=Debian-gdm
-	if getent passwd "${_gdm_user}" >/dev/null; then
-		usermod -aG video,render "${_gdm_user}"
+	local _users=()
+	if grep -q "^${_gdm_user}:" "${SDCARD}/etc/passwd" 2>/dev/null; then
+		_users+=("${_gdm_user}")
 	fi
-
 	# Any pre-existing interactive user, so a serial-console install can log in
 	# and get a GPU session without a manual usermod.
-	for _u in $(awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' "${SDCARD}/etc/passwd" 2>/dev/null); do
-		usermod -aG video,render "${_u}"
-	done
+	while read -r _u; do
+		if [[ -n "${_u}" ]]; then
+			_users+=("${_u}")
+		fi
+	done < <(awk -F: '$3 >= 1000 && $3 < 65534 {print $1}' "${SDCARD}/etc/passwd" 2>/dev/null)
+
+	if grep -q '^video:' "${SDCARD}/etc/group" 2>/dev/null &&
+		grep -q '^render:' "${SDCARD}/etc/group" 2>/dev/null; then
+		for _u in "${_users[@]}"; do
+			usermod --root "${SDCARD}" -aG video,render "${_u}" ||
+				display_alert "rockchip-multimedia" "could not add ${_u} to video/render" "warn"
+		done
+	else
+		display_alert "rockchip-multimedia" "no video/render group in image; skipping group grants" "warn"
+	fi
 
 	mkdir -p "${SDCARD}/etc/udev/rules.d"
 	cat > "${SDCARD}/etc/udev/rules.d/60-dma-heap-access.rules" <<'RULEOF'
@@ -506,10 +524,23 @@ SUBSYSTEM=="dma_heap", KERNEL=="system|system-uncached|reserved", MODE="0660", G
 KERNEL=="dma_heap[0-9]*", MODE="0660", GROUP="video"
 RULEOF
 
-	# No gdm config here on purpose: the gnome desktop package ships
-	# packages/blobs/desktop/gdm/daemon.conf, which already pins
-	# WaylandEnable=true and the wayland greeter. gdm3 merges daemon.conf with
-	# custom.conf, so writing a second file here would only duplicate it.
+	# gdm3 owns /etc/gdm3/daemon.conf, so the gnome desktop package cannot
+	# ship its own copy: dpkg aborts the unpack with "trying to overwrite
+	# '/etc/gdm3/daemon.conf', which is also in package gdm3" and the image
+	# build dies. Write it straight into the rootfs instead, which also means
+	# the wayland greeter survives a later gdm3 upgrade as an unmodified
+	# conffile conflict rather than a hard install failure.
+	local _dconf_src="${SRC:-/armbian}/packages/blobs/desktop/gdm/daemon.conf"
+	if [[ -f "${_dconf_src}" ]]; then
+		mkdir -p "${SDCARD}/etc/gdm3"
+		if cp "${_dconf_src}" "${SDCARD}/etc/gdm3/daemon.conf"; then
+			display_alert "rockchip-multimedia" "installed wayland-first gdm3 daemon.conf" "info"
+		else
+			display_alert "rockchip-multimedia" "could not install ${_dconf_src}; greeter session type left at the gdm3 default" "warn"
+		fi
+	else
+		display_alert "rockchip-multimedia" "gdm3 daemon.conf not found at ${_dconf_src}; greeter session type left at the gdm3 default" "warn"
+	fi
 }
 
 # NOTE: the first customize_image definition wins, so symlink setup runs from
@@ -598,6 +629,22 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 	# the GDM greeter silently falls back to X11 with llvmpipe.
 	if [[ ! -f "${SDCARD}/etc/udev/rules.d/60-dma-heap-access.rules" ]]; then
 		exit_with_error "rockchip-multimedia: /etc/udev/rules.d/60-dma-heap-access.rules missing; Mali gbm will fail for non-root"
+	fi
+
+	# usermod needs to chroot into the image, which fails silently if the build
+	# ever runs unprivileged, so check the group membership actually landed.
+	if grep -q '^Debian-gdm:' "${SDCARD}/etc/passwd" 2>/dev/null; then
+		if ! awk -F: '$1 == "video" {print $4}' "${SDCARD}/etc/group" |
+			tr ',' '\n' | grep -qx 'Debian-gdm'; then
+			exit_with_error "rockchip-multimedia: Debian-gdm is not in the video group; the greeter cannot open /dev/dri/card0"
+		fi
+	fi
+
+	# Only a warning: without gdm3 there is no greeter to configure, and the
+	# stock daemon.conf is a sane fallback for a desktop-less image.
+	if [[ -f "${SDCARD}/etc/gdm3/daemon.conf" ]] &&
+		! grep -q '^WaylandEnable=true' "${SDCARD}/etc/gdm3/daemon.conf"; then
+		display_alert "rockchip-multimedia" "gdm3 daemon.conf does not enable Wayland; the blob has no GLX, so the greeter will use llvmpipe" "warn"
 	fi
 
 	display_alert "rockchip-multimedia" "verified: MPP + librga + RKNN runtime + Mali G52 EGL/GLES/GBM installed" "info"
