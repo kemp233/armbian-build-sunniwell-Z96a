@@ -36,7 +36,7 @@ on:
         type: string
         default: g24p0
       mali_platform:
-        description: 'Mali platform (x11-gbm has color-shift bug on this panel)'
+        description: 'Mali platform (each is a standalone, mutually exclusive blob)'
         type: choice
         options: [wayland-gbm, x11-gbm, gbm]
         default: wayland-gbm
