@@ -241,9 +241,34 @@
 	 * engine never clears reset ("Failed to reset the dma"). */
 	clock_in_out = "input";
 
+	/* SCLK_GMAC1 (the GMAC register bus clock, consumer "stmmaceth")
+	 * must be parented to the external gmac1_clkin, NOT to the internal
+	 * CLK_MAC1_2TOP PLL.  The two are a matched pair: "input" means the
+	 * PHY drives the 125MHz in, and clk-rk3568.c's mux_gmac1_p is
+	 * { "clk_mac1_2top", "gmac1_clkin" } - index 0 is the SoC-output
+	 * path, index 1 is the receive path.  Parenting to CLK_MAC1_2TOP
+	 * while clock_in_out="input" leaves the CRU muxed onto the transmit
+	 * side of a clock the PHY is actually driving.
+	 *
+	 * 4f421a1ec (2026-09-22) changed this from <&gmac1_clkin> to
+	 * <&cru CLK_MAC1_2TOP>, and the board has not had a working NIC
+	 * since.  Every known-good RK3566 gmac1 in this same kernel tree
+	 * pairs the two the other way round - see
+	 * rk3566-box-demo-v10.dtsi:179+187 (clock_in_out="input" with
+	 * assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
+	 * <&gmac1_clkin>), and likewise rk3568-dshapi-r1.dts and
+	 * rk3566-h96max-v56.dts.  The stale copy of this board's DTS in
+	 * the kernel repo (arch/arm64/boot/dts/rockchip/rk3566-lb2004.dts)
+	 * still carries the original <&gmac1_clkin>.
+	 *
+	 * Failure signature this is meant to fix: MDIO works (the PHY binds
+	 * on every retry) but dwmac4_dma_reset() in dwmac4_lib.c times out
+	 * after its full 1s readl_poll_timeout on DMA_BUS_MODE_SFT_RESET,
+	 * i.e. the register-bus clock domain never lets go.
+	 */
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
-				 <&cru CLK_MAC1_2TOP>;
+				 <&gmac1_clkin>;
 	assigned-clock-rates = <125000000>, <125000000>;
 
 	pinctrl-names = "default";
