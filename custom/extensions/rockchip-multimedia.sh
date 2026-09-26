@@ -298,6 +298,15 @@ function _rockchip_multimedia_build_vaapi() {
 		export PKG_CONFIG_PATH="${mpp_stage}${prefix}/${lib_dir}/pkgconfig:${PKG_CONFIG_PATH:-}"
 	fi
 
+	# MPP 头文件装在 staging 目录 (不落宿主 /usr/include), 必须显式指给 Makefile.
+	# Makefile 用 := 硬编码 CFLAGS, 命令行传 CFLAGS 会覆盖 pkg-config 的 libva include,
+	# 所以直接在 Makefile 里追加 include 路径.
+	local mpp_inc="${mpp_stage}${prefix}/include"
+	if [[ -d "${mpp_inc}/rockchip" ]]; then
+		sed -i "s|-I/usr/include/rockchip|-I${mpp_inc} -I${mpp_inc}/rockchip -I/usr/include/rockchip|" "${src_dir}/Makefile"
+		display_alert "rockchip-multimedia" "patched Makefile include path -> ${mpp_inc}" "info"
+	fi
+
 	cd "${src_dir}"
 	# 目标名与旧驱动一致, 直接覆盖只有编码的 rockchip_drv_video.so
 	local va_out="rockchip_drv_video.so"
