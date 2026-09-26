@@ -36,10 +36,10 @@ on:
         type: string
         default: g24p0
       mali_platform:
-        description: 'Mali platform'
+        description: 'Mali platform (x11-gbm has color-shift bug on this panel)'
         type: choice
-        options: [x11-gbm, gbm, wayland-gbm]
-        default: x11-gbm
+        options: [wayland-gbm, x11-gbm, gbm]
+        default: wayland-gbm
 
 permissions:
   contents: write
@@ -115,6 +115,10 @@ jobs:
             libxcb1-dev:arm64 \
             libx11-xcb-dev:arm64 \
             libxcb-glx0-dev:arm64 \
+            libwayland-client0:arm64 \
+            libwayland-server0:arm64 \
+            libwayland-egl1:arm64 \
+            libwayland-dev:arm64 \
             libxcb-dri2-0-dev:arm64 \
             libxcb-dri3-dev:arm64 \
             libxcb-present-dev:arm64 \
@@ -232,6 +236,12 @@ jobs:
             test -e "$STAGE_LIB_DIR/$wrapper"
             aarch64-linux-gnu-readelf -h "$STAGE_LIB_DIR/$wrapper" >/dev/null
           done
+          # wayland-gbm 平台额外需要 wayland-egl wrapper
+          if [ "${{ inputs.mali_platform }}" = "wayland-gbm" ]; then
+            test -e "$STAGE_LIB_DIR/libwayland-egl.so.1"
+            aarch64-linux-gnu-readelf -h "$STAGE_LIB_DIR/libwayland-egl.so.1" >/dev/null
+            echo "Verified wayland-egl wrapper for wayland-gbm platform"
+          fi
           echo "Verified real Mali library: $LIBMALI ($(stat -c '%s' "$LIBMALI") bytes)"
 
       - name: Create Debian package from installed Mali userspace
@@ -571,6 +581,10 @@ jobs:
           for wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
             test -e "/tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl/$wrapper"
           done
+          # wayland-gbm 平台额外需要 wayland-egl wrapper
+          if [ "${{ inputs.mali_platform }}" = "wayland-gbm" ]; then
+            test -e "/tmp/z96a-mali-package-check/usr/lib/aarch64-linux-gnu/mali-egl/libwayland-egl.so.1"
+          fi
 
       - name: Configure apt sources for ARM64 (native runner)
         run: |
