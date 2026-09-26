@@ -116,10 +116,21 @@ function post_family_config__rockchip_multimedia_gles_packages() {
 	_rmm_init
 
 	# Mali G52 provides EGL/GLES3.2/GBM through the package produced by
-	# build-with-mali.yml. Keep Mesa's desktop GLX fallback available for
-	# X11 desktops, and add the tools/regulatory data used to verify USB
-	# Ethernet and USB Wi-Fi/Bluetooth devices.
-	add_packages_to_image libegl1 libgles2 libgl1-mesa-dri libva2 libva-drm2 vainfo glmark2-es2 mesa-utils-extra ethtool iw wireless-regdb bluez
+	# build-with-mali.yml.
+	#
+	# libgl1-mesa-dri provides the desktop GLX fallback that X11-only
+	# desktops (cinnamon/xfce on this board) need. For wayland desktops
+	# (gnome) it is actively harmful: gnome-shell resolves GL via GLX during
+	# the X11-greeter phase and would pick Mesa's llvmpipe instead of the
+	# Mali blob, so hardware compositing never engages.
+	local mesa_glx_pkg=""
+	if [[ "${DESKTOP_ENVIRONMENT:-}" != "gnome" ]]; then
+		mesa_glx_pkg="libgl1-mesa-dri"
+	fi
+
+	# add tools/regulatory data used to verify USB Ethernet and USB
+	# Wi-Fi/Bluetooth devices.
+	add_packages_to_image libegl1 libgles2 ${mesa_glx_pkg} libva2 libva-drm2 vainfo glmark2-es2 mesa-utils-extra ethtool iw wireless-regdb bluez
 }
 
 # ============================================================ MPP --
