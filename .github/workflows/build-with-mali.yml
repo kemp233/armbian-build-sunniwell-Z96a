@@ -189,9 +189,13 @@ jobs:
         env:
           PKG_CONFIG_PATH: "/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"
         run: |
+          # Mali blob 架构必须和 SoC 匹配, 否则 eglInitialize 失败 / X 崩溃.
+          # libmali-rockchip 默认 gpu=midgard-t86x (RK3399), RK3568 是 bifrost-g52.
           meson setup builddir --cross-file /tmp/cross-file.txt \
             --prefix=/usr \
             --libdir=lib/aarch64-linux-gnu \
+            -Dgpu=${{ inputs.mali_gpu }} \
+            -Dversion=${{ inputs.mali_version }} \
             -Dplatform=${{ inputs.mali_platform }} \
             -Dwerror=false
 
