@@ -224,84 +224,66 @@
 	status = "okay";
 };
 
-/* GMAC1 Ethernet - config per original Android DT (ethernet@fe010000):
- * RGMII with external 125MHz clkin, gmac1m1 pin mux (NOT m0), PHY reset on
- * GPIO4 PC2, generic clause-22 PHY at mdio address 0, tx_delay 0x4f /
- * rx_delay 0x2d. Previous port used the m0 mux and PA3 reset pin, which is
- * why the wired NIC never came up. */
+/* GMAC1 Ethernet - wired NIC (RTL8211F / MAE0621A-Q2C at mdio address 0).
+ *
+ * This block now matches the factory configuration exactly, which is what
+ * makes the MAC come up at all. Two properties were wrong and together they
+ * kept the NIC completely dead:
+ *
+ *   1. phy-mode was "rgmii-rxid". The factory (and every other RK3566 board
+ *      in this kernel tree: rk3566-box-demo-v10.dtsi, rk3566-h96max-v56.dts,
+ *      rk3568-dshapi-r1.dts) uses plain "rgmii" with clock_in_out="input".
+ *      "rgmii-rxid" makes dwmac4_dma_reset() hang: the soft reset bit in
+ *      DMA_BUS_MODE never clears, so every __stmmac_open() dies with
+ *      "Failed to reset the dma" / "DMA engine initialization failed".
+ *   2. The PHY node carried no ID, so the first MDIO read of PHY_ID1 came back
+ *      0xffff and the board bound "Generic PHY" - which has no gigabit
+ *      support, so even a working link would cap at 100M. Putting the ID in the
+ *      DT compatible (the way the BSP does) makes fwnode_mdiobus_register_phy()
+ *      take the ID from the DT instead of from MDIO, so the realtek/MAE0621A
+ *      driver binds. See drivers/net/mdio/fwnode_mdio.c: the DT-supplied ID
+ *      completely replaces the probe read.
+ *
+ * The PHY reset is on GPIO4 PC2, on the gmac node, exactly as the RK3566
+ * reference design has it. Note the BSP board file
+ * (arch/arm64/boot/dts/rockchip/rk3566-lb2004.dts) claims gpio4 RK_PA3 here,
+ * but on the m1 pin mux this board uses, PA3 is gmac1_rxclk (see
+ * gmac1m1_rgmii_clk in rk3568-pinctrl.dtsi) - requesting it as a GPIO steals
+ * the RGMII receive clock and warns "switch mux 3 to GPIO". PC2 is what
+ * rk3566-box-demo-v10.dtsi uses for the same m1 wiring.
+ */
 &gmac1 {
-	/* phy-mode rgmii-rxid: extracted from a working Debian LB2004 - its
-	 * PHY (MAE0621A-Q2C, id 0x7b744411) comes up with this mode; plain
-	 * "rgmii" left the id read as 0xffff4411 (PHY id1 unreadable). */
-	phy-mode = "rgmii-rxid";
-	/* clock direction: MAE0621A runs off a 25MHz crystal next to the
-	 * chip and generates the 125M RGMII reference clock itself, so the
-	 * SoC must receive it (clock_in_out="input").  With "output" the
-	 * SoC drives gmac1_clkin against the PHY's output and the DMA
-	 * engine never clears reset ("Failed to reset the dma"). */
+	phy-mode = "rgmii";
 	clock_in_out = "input";
 
-	/* SCLK_GMAC1 (the GMAC register bus clock, consumer "stmmaceth")
-	 * must be parented to the external gmac1_clkin, NOT to the internal
-	 * CLK_MAC1_2TOP PLL.  The two are a matched pair: "input" means the
-	 * PHY drives the 125MHz in, and clk-rk3568.c's mux_gmac1_p is
-	 * { "clk_mac1_2top", "gmac1_clkin" } - index 0 is the SoC-output
-	 * path, index 1 is the receive path.  Parenting to CLK_MAC1_2TOP
-	 * while clock_in_out="input" leaves the CRU muxed onto the transmit
-	 * side of a clock the PHY is actually driving.
-	 *
-	 * 4f421a1ec (2026-09-22) changed this from <&gmac1_clkin> to
-	 * <&cru CLK_MAC1_2TOP>, and the board has not had a working NIC
-	 * since.  Every known-good RK3566 gmac1 in this same kernel tree
-	 * pairs the two the other way round - see
-	 * rk3566-box-demo-v10.dtsi:179+187 (clock_in_out="input" with
-	 * assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
-	 * <&gmac1_clkin>), and likewise rk3568-dshapi-r1.dts and
-	 * rk3566-h96max-v56.dts.  The stale copy of this board's DTS in
-	 * the kernel repo (arch/arm64/boot/dts/rockchip/rk3566-lb2004.dts)
-	 * still carries the original <&gmac1_clkin>.
-	 *
-	 * Failure signature this is meant to fix: MDIO works (the PHY binds
-	 * on every retry) but dwmac4_dma_reset() in dwmac4_lib.c times out
-	 * after its full 1s readl_poll_timeout on DMA_BUS_MODE_SFT_RESET,
-	 * i.e. the register-bus clock domain never lets go.
-	 */
+	/* SCLK_GMAC1 (the GMAC register bus clock, consumer "stmmaceth") runs off
+	 * the external 125MHz gmac1_clkin; SCLK_GMAC1_RX_TX off the internal
+	 * RGMII speed divider. Same pairing as the BSP and the reference design. */
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>,
 				 <&gmac1_clkin>;
-	assigned-clock-rates = <125000000>, <125000000>;
 
 	pinctrl-names = "default";
 	pinctrl-0 = <&gmac1m1_miim &gmac1m1_tx_bus2 &gmac1m1_rx_bus2
 		     &gmac1m1_rgmii_clk &gmac1m1_rgmii_bus &gmac1m1_clkinout>;
 
-	/* PHY reset on GPIO4 PC2. Moved from the gmac node's legacy
-	 * snps,reset-gpio (which only pulses the line once during mdio
-	 * register and then devm_gpiod_put() releases it - on this board
-	 * the PHY then falls back to reset and PHY ID1 reads 0xffff) to
-	 * the mdio node's standard reset-gpios: the mdio subsystem holds
-	 * the GPIO, asserts/deasserts around every PHY probe, so the PHY
-	 * is guaranteed out of reset before its ID is read. */
+	/* Reset time is 20ms, 100ms for rtl8211f */
+	snps,reset-gpio = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
+	snps,reset-active-low;
 	snps,reset-delays-us = <0 20000 100000>;
 
 	tx_delay = <0x4f>;
 	rx_delay = <0x2d>;
 
 	phy-handle = <&rgmii_phy1>;
+	phy-supply = <&vcc_3v3>;
 	status = "okay";
 };
 
 &mdio1 {
-	/* reset-gpios here (not on gmac): mdio subsystem does the full
-	 * assert/deassert around PHY probe and holds the line, so the PHY
-	 * (MAE0621A-Q2C) is stable before its ID is read. Delays match the
-	 * working Debian LB2004 (snps,reset-delays-us <0 20000 100000>). */
-	reset-gpios = <&gpio4 RK_PC2 GPIO_ACTIVE_LOW>;
-	reset-delay-us = <20>;
-	reset-post-delay-us = <100000>;
-
 	rgmii_phy1: ethernet-phy@0 {
-		compatible = "ethernet-phy-ieee802.3-c22";
+		compatible = "ethernet-phy-id7b74.4411",
+			     "ethernet-phy-ieee802.3-c22";
 		reg = <0>;
 	};
 };
