@@ -1,0 +1,123 @@
+From: kemp233 <kemp233@users.noreply.github.com>
+Subject: [PATCH] rknpu: fix dma_buf lifetime BUG_ON at process exit / shutdown
+
+Port of the rk-6.1-rkr5.1 fixes e5b86e434378 + afab7ff17606 to rkr7.2.
+
+Two lifetime bugs in the rknpu kernel-mapping path:
+
+1. rknpu_mem_create_ioctl() dma_buf_vmaps the buffer and stashes the
+   kv_addr, taking no reference of its own.  On process exit the fd
+   table may close the dma_buf fd BEFORE the /dev/rknpu fd; the dmabuf
+   is then released with a nonzero vmapping_counter and dma_buf_release
+   fires BUG_ON/WARN_ON - the known Z96A "cannot reboot / stopping the
+   voice stack panics the kernel" crash during late shutdown, when
+   processes and their fds are torn down.
+
+   Fix: get_dma_buf() at create, dma_buf_put() at the matching vunmap
+   in rknpu_mem_destroy_ioctl() and rknpu_release().
+
+2. rknpu_mem_destroy_ioctl() identified the object as
+   "rknpu_obj == entry" after the list walk - if the object was already
+   freed by rknpu_release (fd close order above), entry points at an
+   unrelated element and the code vunmaps/kfrees the wrong or stale
+   object.  Fix: explicit found flag; log and return -EINVAL when the
+   object is not on the session list.
+
+Hand-ported onto the rkr7.2 rknpu driver (v0.9.8, vmap kept in a local
+iosys_map), git apply --check clean.
+---
+diff --git a/drivers/rknpu/rknpu_drv.c b/drivers/rknpu/rknpu_drv.c
+index 9e6f1d2..32886f1 100644
+--- a/drivers/rknpu/rknpu_drv.c
++++ b/drivers/rknpu/rknpu_drv.c
+@@ -571,6 +571,8 @@ static int rknpu_release(struct inode *inode, struct file *file)
+ 				IOSYS_MAP_INIT_VADDR(entry->kv_addr);
+ 			dma_buf_vunmap(entry->dmabuf, &map);
+ 			entry->kv_addr = NULL;
++			/* drop the extra reference taken for the kernel map */
++			dma_buf_put(entry->dmabuf);
+ 		}
+ 
+ 		dma_buf_unmap_attachment(entry->attachment, entry->sgt,
+diff --git a/drivers/rknpu/rknpu_mem.c b/drivers/rknpu/rknpu_mem.c
+index 84ec2a7..e096a71 100644
+--- a/drivers/rknpu/rknpu_mem.c
++++ b/drivers/rknpu/rknpu_mem.c
+@@ -156,6 +156,13 @@ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+ 			goto err_detach_dma_buf;
+ 		}
+ 		rknpu_obj->kv_addr = map.vaddr;
++		/* Hold an extra reference for the lifetime of the kernel
++		 * mapping.  On process exit the fd table may close the
++		 * dma_buf fd BEFORE the /dev/rknpu fd; without this extra
++		 * ref the dmabuf would be released (dma_buf_release BUGs on
++		 * a nonzero vmapping_counter) before rknpu_release runs the
++		 * matching dma_buf_vunmap. */
++		get_dma_buf(dmabuf);
+ 	}
+ 
+ 	rknpu_obj->size = PAGE_ALIGN(args.size);
+@@ -221,6 +228,7 @@ int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+ 	struct rknpu_session *session = NULL;
+ 	struct rknpu_mem_destroy args;
+ 	int ret = -EFAULT;
++	bool found = false;
+ 
+ 	if (unlikely(copy_from_user(&args, (struct rknpu_mem_destroy *)data,
+ 				    sizeof(struct rknpu_mem_destroy)))) {
+@@ -252,28 +260,41 @@ int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+ 	list_for_each_entry_safe(entry, q, &session->list, head) {
+ 		if (entry == rknpu_obj) {
+ 			list_del(&entry->head);
++			found = true;
+ 			break;
+ 		}
+ 	}
+ 	spin_unlock(&rknpu_dev->lock);
+ 
+-	if (rknpu_obj == entry) {
+-		if (rknpu_obj->kv_addr) {
+-			struct iosys_map map =
+-				IOSYS_MAP_INIT_VADDR(rknpu_obj->kv_addr);
+-			dma_buf_vunmap(rknpu_obj->dmabuf, &map);
+-			rknpu_obj->kv_addr = NULL;
+-		}
++	/* If the object is not on this session's list it was already
++	 * freed by rknpu_release (fd close order: /dev/rknpu fd may be
++	 * closed before the dma_buf fd).  Skipping the vunmap here would
++	 * leak the dmabuf vmapping_counter and the extra get_dma_buf
++	 * reference taken at create time, which eventually trips
++	 * BUG_ON/WARN_ON in dma_buf_release. */
++	if (!found) {
++		LOG_ERROR("%s: object %#llx not in session list\n", __func__,
++			  (__u64)(uintptr_t)rknpu_obj);
++		return -EINVAL;
++	}
++
++	if (rknpu_obj->kv_addr) {
++		struct iosys_map map =
++			IOSYS_MAP_INIT_VADDR(rknpu_obj->kv_addr);
++		dma_buf_vunmap(rknpu_obj->dmabuf, &map);
++		rknpu_obj->kv_addr = NULL;
++		/* drop the extra reference taken for the kernel map */
++		dma_buf_put(rknpu_obj->dmabuf);
++	}
+ 
+-		dma_buf_unmap_attachment(rknpu_obj->attachment, rknpu_obj->sgt,
+-					 DMA_BIDIRECTIONAL);
+-		dma_buf_detach(rknpu_obj->dmabuf, rknpu_obj->attachment);
++	dma_buf_unmap_attachment(rknpu_obj->attachment, rknpu_obj->sgt,
++				 DMA_BIDIRECTIONAL);
++	dma_buf_detach(rknpu_obj->dmabuf, rknpu_obj->attachment);
+ 
+-		if (!rknpu_obj->owner)
+-			dma_buf_put(rknpu_obj->dmabuf);
++	if (!rknpu_obj->owner)
++		dma_buf_put(rknpu_obj->dmabuf);
+ 
+-		kfree(rknpu_obj);
+-	}
++	kfree(rknpu_obj);
+ 
+ 	return 0;
+ }
