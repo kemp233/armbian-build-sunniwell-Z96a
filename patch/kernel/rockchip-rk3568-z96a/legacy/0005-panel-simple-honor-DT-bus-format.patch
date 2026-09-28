@@ -1,0 +1,43 @@
+--- a/drivers/gpu/drm/panel/panel-simple.c
++++ b/drivers/gpu/drm/panel/panel-simple.c
+@@ -206,6 +206,13 @@
+ 
+ 	const struct panel_desc *desc;
+ 
++	/**
++	 * @bus_format_override: output bus format from the DT "bus-format"
++	 * property, taking precedence over desc->bus_format when set
++	 * (0 = unset).
++	 */
++	u32 bus_format_override;
++
+ 	struct regulator *supply;
+ 	struct i2c_adapter *ddc;
+ 
+@@ -479,7 +486,10 @@
+ 		connector->display_info.width_mm = panel->desc->size.width;
+ 	if (panel->desc->size.height)
+ 		connector->display_info.height_mm = panel->desc->size.height;
+-	if (panel->desc->bus_format)
++	if (panel->bus_format_override)
++		drm_display_info_set_bus_formats(&connector->display_info,
++						 &panel->bus_format_override, 1);
++	else if (panel->desc->bus_format)
+ 		drm_display_info_set_bus_formats(&connector->display_info,
+ 						 &panel->desc->bus_format, 1);
+ 	if (panel->desc->bus_flags)
+@@ -888,6 +898,14 @@
+ 	panel->prepared_time = 0;
+ 	panel->desc = desc;
+ 
++	/*
++	 * Vendor DTs describe the panel output bus format via a
++	 * "bus-format" property; without this, generic DT panels are
++	 * driven as RGB888 even when the DT says RGB666.
++	 */
++	of_property_read_u32(dev->of_node, "bus-format",
++			     &panel->bus_format_override);
++
+ 	panel->supply = devm_regulator_get(dev, "power");
+ 	if (IS_ERR(panel->supply)) {
+ 		err = PTR_ERR(panel->supply);

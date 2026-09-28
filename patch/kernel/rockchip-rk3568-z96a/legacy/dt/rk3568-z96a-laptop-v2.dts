@@ -7519,8 +7519,8 @@
 		// power-supply = <0x125>;  // disabled: violent mux handles LCD power
         power-supply = <0x125>;
 	/* enable-gpios removed: GPIO0_A3 is the RK809 INT pin */
-		bus-format = <0x100a>;
-		bpc = <0x08>;
+		bus-format = <0x1009>;/* factory: RGB666_1X18, 6bpc panel */
+		bpc = <0x06>;/* factory: 6bpc */
 		width-mm = <0x135>;
 		height-mm = <0xad>;
 		prepare-delay-ms = <0x14>;
