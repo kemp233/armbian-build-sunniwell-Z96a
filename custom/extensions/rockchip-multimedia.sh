@@ -401,14 +401,15 @@ function _rockchip_multimedia_build_vaapi() {
 	# "usr/lib/aarch64-linux-gnu" 这个相对路径, 再叠 ${prefix} 会拼出
 	# usr/usr/lib/... —— 之前 woodyst 那版就是这么把 -lrockchip_mpp 弄丢的。
 	local mpp_stage="${work_dir}/stage/mpp"
+	# 只在下面这两条 cmake 命令作用域里给, 不 export 出去: LD_LIBRARY_PATH 指向
+	# 的是 /tmp 下的 staging 目录, 泄到后面构建步骤里会让它们优先加载这里的
+	# librockchip_mpp, 而不是镜像里那一份。
 	local mpp_lib_dir="${mpp_stage}/${lib_dir}"
 	local mpp_inc_dir="${mpp_stage}${prefix}/include/rockchip"
 	[[ -f "${mpp_inc_dir}/rk_mpi.h" ]] || \
 		exit_with_error "rockchip-multimedia: ${mpp_inc_dir}/rk_mpi.h missing (MPP build stage incomplete)"
 	[[ -f "${mpp_lib_dir}/librockchip_mpp.so" ]] || \
 		exit_with_error "rockchip-multimedia: ${mpp_lib_dir}/librockchip_mpp.so missing (MPP build stage incomplete)"
-	export LIBRARY_PATH="${mpp_lib_dir}:${LIBRARY_PATH:-}"
-	export LD_LIBRARY_PATH="${mpp_lib_dir}:${LD_LIBRARY_PATH:-}"
 
 	# <format> 垫头: 构建容器的 g++ 是 jammy 的 11 (板子上是 12), libstdc++ 都
 	# 没有 C++20 <format>, 而 src/util/log.h 是驱动本体的头, 跑不掉。
@@ -429,6 +430,8 @@ function _rockchip_multimedia_build_vaapi() {
 	mkdir -p "${build_dir}"
 	cd "${build_dir}" || return 1
 
+	LIBRARY_PATH="${mpp_lib_dir}:${LIBRARY_PATH:-}" \
+	LD_LIBRARY_PATH="${mpp_lib_dir}:${LD_LIBRARY_PATH:-}" \
 	cmake "${src_dir}" \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_C_COMPILER="${CC}" \
@@ -441,6 +444,7 @@ function _rockchip_multimedia_build_vaapi() {
 
 	# 只编驱动本体。tools/ 下那几个探针要 EGL/GLES/gbm 头, 那是板上排查 Firefox
 	# 时用的, 跟镜像无关; 全量 make 会因为它们编不出来。
+	LIBRARY_PATH="${mpp_lib_dir}:${LIBRARY_PATH:-}" \
 	cmake --build . --target rockchip_drv_video -j"$(nproc)" \
 		|| exit_with_error "rockchip-multimedia: rockchip_drv_video build failed"
 
@@ -454,13 +458,13 @@ function _rockchip_multimedia_build_vaapi() {
 
 	# 门禁二: 别把带 not found 的库塞进镜像。构建容器本身就是 arm64, 未必装了
 	# aarch64-linux-gnu-* 那套交叉 binutils, 两个名字都试一遍。
-	local readelf_bin=""
+	local objdump_bin="" _t=""
 	for _t in objdump aarch64-linux-gnu-objdump; do
-		command -v "${_t}" >/dev/null 2>&1 && { readelf_bin="${_t}"; break; }
+		command -v "${_t}" >/dev/null 2>&1 && { objdump_bin="${_t}"; break; }
 	done
 	local missing_libs=""
-	if [[ -n "${readelf_bin}" ]]; then
-		missing_libs="$("${readelf_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}' | while read -r _l; do
+	if [[ -n "${objdump_bin}" ]]; then
+		missing_libs="$("${objdump_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}' | while read -r _l; do
 			[[ -f "${mpp_lib_dir}/${_l}" || -e "/usr/lib/aarch64-linux-gnu/${_l}" ]] || echo "${_l}"
 		done)"
 	fi
