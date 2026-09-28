@@ -10,7 +10,7 @@
 	interrupt-parent = <0x01>;
 	#address-cells = <0x02>;
 	#size-cells = <0x02>;
-	model = "Sunniwell Z96A RK3568 DDR4 Laptop (V2: RK809-5 + CN3705 + HUSB311)";
+	model = "Sunniwell Z96A RK3568 DDR4 Laptop (V2: RK809-5 + CN3705)";
 
 	ddr3-params {
 		version = <0x100>;
@@ -1371,11 +1371,19 @@
 			reg = <0x4e>;
 			pinctrl-names = "default";
 			pinctrl-0 = <0x3f>;
-			/* vcc5v0_usb (0x112): known-good VBUS rail on V2 */
-			vbus-supply = <0x112>;
+			/* vbus-supply = <0x112>; */
 			interrupt-parent = <0x41>;
 			interrupts = <0x1d 0x08>;
-			status = "okay";
+			/* 必须 disabled: HUSB311 是 v1 板的 Type-C PD 控制器, v2 上
+			 * 没有这颗料 (v2 的 Type-C 中断脚 fusb0-int 按 FUSB302 布线,
+			 * 充电协商由 SC8886 自己完成)。但 v1 时代它被留在节点里且
+			 * status=okay, 驱动 probe 后挂在 GPIO0_D5 上 —— 实测该中断线
+			 * 以 ~750 次/秒持续风暴 (253 秒里 19 万次), 每次都到总线 0 上
+			 * 读寄存器 (总线上同挂 RK809), 最终一笔传输永挂 → PMIC 122 秒
+			 * 无响应 → rk817_battery_work 卡死 → hung_task panic
+			 * (CONFIG_BOOTPARAM_HUNG_TASK_PANIC=y)。这就是 rkr7.2 镜像
+			 * 开机 ~4 分钟必崩的完整链条。 */
+			status = "disabled";
 			phandle = <0x177>;
 
 			ports {
