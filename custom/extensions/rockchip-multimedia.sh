@@ -351,7 +351,7 @@ function _rockchip_multimedia_build_vaapi() {
 	_rmm_init
 	local src_dir="${work_dir}/src/rockchip_vaapi_driver"
 	local build_dir="${work_dir}/build/rockchip_vaapi_driver"
-	local stage_dir="${work_dir}/stage/libva-rkmpp"
+	local stage_dir="${work_dir}/stage/rockchip-vaapi"
 
 	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}" || return 1
 
@@ -718,9 +718,24 @@ function _rockchip_multimedia_setup_mali_symlinks() {
 	fi
 
 	mkdir -p "${SDCARD}/etc/profile.d"
+	# libva 的驱动名是 .so 文件名里 _drv_video.so 之前的部分。装的是
+	# rockchip_drv_video.so (sfqr0414/rockchip_vaapi_driver), 所以名字是 rockchip;
+	# 之前写的 rkmpp 是 woodyst/rockchip-vaapi 那个的产物名, 换驱动后没跟着改,
+	# 结果 libva 去找 rkmpp_drv_video.so 找不到 —— 板子上 Firefox 加载不了
+	# VA 驱动就是这么来的。
 	cat > "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" << 'EOF'
-export LIBVA_DRIVER_NAME=rkmpp
+export LIBVA_DRIVER_NAME=rockchip
 export LIBVA_DRIVERS_PATH=/usr/lib/aarch64-linux-gnu/dri
+
+# 默认是 stable-export (每帧 memcpy 进驱动自有的常驻 DRM 缓冲再导出), 因为
+# 这块板的 Mali + Xorg 合成栈吃不下 dmabuf。零拷贝开关是它反过来:
+#   export ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT=1
+# 真零拷贝时驱动会 mpp_buffer_inc_ref + dup 帧的 fd, 省掉那次 memcpy, 但导出
+# 出去的是 MPP 的帧缓冲, 显示端必须能直接引用它。
+#
+# 另外两个调试开关: ROCKCHIP_VAAPI_STRICT_ERRINFO=1 恢复"信 errinfo"(默认不信,
+# 因为 RK3568 上 MPP 在成功解出的帧上也残留 errinfo); ROCKCHIP_VAAPI_AV1_EXPORT_P010=1
+# 是 AV1 10bit 导出用的, 这块板用不上。
 EOF
 
 	display_alert "rockchip-multimedia" "Mali G52 providers configured" "info"
@@ -741,25 +756,28 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 	# Check core libraries. Names match what the build steps actually install:
 	# MPP installs librockchip_mpp.so (not libmpp.so), librga ships prebuilt
 	# librga.so, RKNN runtime ships librknnrt.so (not librknn_api.so).
-	# The VA-API driver (rkmpp_drv_video.so) is optional - its build is
-	# non-fatal because it needs librkenc-* which we do not build.
+	# The VA-API driver now belongs here too: its build is a hard failure
+	# (exit_with_error) rather than a warning, so by the time we get to the
+	# pre-umount verify it has either been installed or the build already died.
 	for f in \
 		"${lib_dir}/librockchip_mpp.so" \
 		"${lib_dir}/librga.so" \
-		"${lib_dir}/librknnrt.so"; do
+		"${lib_dir}/librknnrt.so" \
+		"${lib_dir}/dri/rockchip_drv_video.so"; do
 		if [[ ! -e "${SDCARD}/${f}" ]]; then
 			exit_with_error "rockchip-multimedia: expected file missing from rootfs: /${f}"
 		fi
 	done
 
-	# Optional bits: only warn if the VA-API driver was skipped.
-	for f in \
-		"${lib_dir}/dri/rkmpp_drv_video.so" \
-		"etc/profile.d/rockchip-vaapi.sh"; do
-		if [[ ! -e "${SDCARD}/${f}" ]]; then
-			display_alert "rockchip-multimedia" "optional file missing from rootfs: /${f}" "warn"
-		fi
-	done
+	# 可执行位和 profile.d 脚本同样要真的在, 不能靠 "optional"。
+	if [[ ! -x "${SDCARD}/${lib_dir}/dri/rockchip_drv_video.so" ]]; then
+		exit_with_error "rockchip-multimedia: /${lib_dir}/dri/rockchip_drv_video.so is not executable"
+	fi
+	# profile.d 里写的驱动名必须和实际装进来的 .so 对得上, 否则 libva 按名字
+	# 去找 ${LIBVA_DRIVER_NAME}_drv_video.so 会找不到。
+	if ! grep -q "^export LIBVA_DRIVER_NAME=rockchip$" "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" 2>/dev/null; then
+		exit_with_error "rockchip-multimedia: /etc/profile.d/rockchip-vaapi.sh does not set LIBVA_DRIVER_NAME=rockchip"
+	fi
 
 	# Runtime provider links must resolve inside the Mali package directory.
 	for _gl in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
