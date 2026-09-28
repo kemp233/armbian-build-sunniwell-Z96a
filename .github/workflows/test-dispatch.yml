@@ -12,4 +12,8 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - run: echo "Test input: ${{ inputs.test_input }}"
+      # 原来这里是 - run: echo "Test input: ${{ ... }}", 裸的 plain scalar 里
+      # 含有 "Test input: " 这个 冒号+空格, YAML 不允许 —— 整个 workflow 文件
+      # 解析失败, 每次 push 都会挂一个 failure run (0 秒就红, 连日志都没有)。
+      # 外面套单引号即可, 引号内的双引号原样保留。
+      - run: 'echo "Test input: ${{ inputs.test_input }}"'
