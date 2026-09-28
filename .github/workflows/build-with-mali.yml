@@ -240,7 +240,22 @@ jobs:
           if [ "${{ inputs.mali_platform }}" = "wayland-gbm" ]; then
             test -e "$STAGE_LIB_DIR/libwayland-egl.so.1"
             aarch64-linux-gnu-readelf -h "$STAGE_LIB_DIR/libwayland-egl.so.1" >/dev/null
-            echo "Verified wayland-egl wrapper for wayland-gbm platform"
+            # 光有 wrapper 不算数 —— wrapper 可能只是个空壳, 底下没有真正编进去的
+            # wayland 后端。缺 EGL_KHR_platform_wayland 的话 Wayland 客户端会去用
+            # Debian 自带的 libwayland-egl1, 跟 Mali 对不上, 表现就是"Wayland 下
+            # GPU 加速没了"。所以查的是 blob 里有没有这个扩展, 不是文件在不在。
+            if ! strings "$LIBMALI" | grep -q "EGL_KHR_platform_wayland"; then
+              echo "ERROR: blob 里没有 EGL_KHR_platform_wayland, 不能当 wayland 包发"
+              exit 1
+            fi
+            echo "Verified wayland-egl wrapper + EGL_KHR_platform_wayland for wayland-gbm"
+          fi
+          # 名字对内容错的包发过一次: gpu 参数没传进去, meson 用了默认值
+          # gpu=midgard-t86x / version=r18p0 —— 那是 RK3288 的 Mali-T86x,
+          # 不是 RK3568 的 G52。直接在 blob 里认字符串, 比看参数可靠。
+          if strings "$LIBMALI" | grep -q "midgard-t86x"; then
+            echo "ERROR: 打进去的是 midgard-t86x, 不是 ${{ inputs.mali_gpu }}"
+            exit 1
           fi
           echo "Verified real Mali library: $LIBMALI ($(stat -c '%s' "$LIBMALI") bytes)"
 
