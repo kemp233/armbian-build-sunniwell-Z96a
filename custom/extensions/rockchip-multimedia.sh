@@ -396,30 +396,42 @@ function pre_customize_image__rockchip_multimedia_install() {
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
 
-# RK3568 rkvdec 被 staging 的 rockchip_vdec (V4L2) 和 mpp_rkvdec (MPP) 同时 claim.
-# 内核里 mpp_rkvdec 的 of_match 表是旧的 (只认 rk3328/rk3399/v1), 不含
-# rockchip,rkv-decoder-rk3568, 而 rockchip_vdec 有 rk3568 alias -> V4L2 抢先绑定,
-# MPP 拿不到设备, libva 报 "client 9 driver is not ready".
-# 修复: (1) blacklist rockchip_vdec; (2) dtb 里给 rkvdec 加 v1 compatible.
+# RK3568 的 rkvdec 必须由 vendor MPP rkvdec2 拥有, 否则硬解必然失败。
+#
+# of_match_node() 拿 compatible 列表的**第一个**串去匹配。本树里:
+#   mpp_rkvdec2.c:1752  "rockchip,rkv-decoder-rk3568"  <- 全树唯一认这个串的驱动
+#   mpp_rkvdec.c:1834   "rockchip,rkv-decoder-v1"      <- V1, RK3288/3399 时代转址表
+#   staging rkvdec      "rockchip,rk3399-vdec"          <- 跟这个节点无关
+#
+# 所以 DTB 的第一个串必须是 rk3568。曾经在这里往 compatible 里**注入**
+# rockchip,rkv-decoder-v1, 那是反的: V1 驱动抢先绑上, 而 RK3568 的 vdpu383 写的
+# 是寄存器 128~232, V1 却按 {4,6,7,10,...} 去转址, 于是内核读到 "reg[10]=0x1",
+# 拿 fd=1 去 dma_buf_get -> -EINVAL, 日志是
+#   mpp_translate_reg_address:1897: reg[ 10]: 0x00000001 fd 1 failed
+#
+# 现在改成: 探测到 v1 就把它摘掉, 并确认 rk3568 排在最前。
 function _rockchip_multimedia_setup_vdec_mpp_owner() {
-	# 1) 永久禁用 staging V4L2 驱动 (它和 MPP 抢同一个 fdf80200.rkvdec)
+	# 1) 顺手把 staging V4L2 驱动拉黑。它在 RK3568 上本来就绑不上 (只认
+	#    rk3399-vdec), 但留着这条可以防止将来有人重新打开 CONFIG_VIDEO_ROCKCHIP_VDEC
+	#    时又踩"V4L2 抢节点"这个已经被证伪的假设。
 	cat > "${SDCARD}/etc/modprobe.d/blacklist-rockchip-vdec.conf" <<'MODEOF'
-# rkvdec must be owned by the MPP framework (mpp_rkvdec) for libva/MPP decode.
-# The staging rockchip_vdec driver grabs fdf80200.rkvdec first and leaves MPP
-# with "client 9 driver is not ready".
+# rkvdec must be owned by the MPP framework (mpp_rkvdec2) for libva/MPP decode.
+# The staging rockchip_vdec driver only matches rockchip,rk3399-vdec, so it is
+# useless on RK3568; blacklisting it keeps the VPU node unambiguously MPP's.
 blacklist rockchip_vdec
 blacklist v4l2_h264
+blacklist v4l2_hp9
 blacklist v4l2_vp9
 MODEOF
-	display_alert "rockchip-multimedia" "blacklisted staging rockchip_vdec (MPP owns rkvdec)" "info"
+	display_alert "rockchip-multimedia" "blacklisted staging rockchip_vdec (MPP rkvdec2 owns rkvdec)" "info"
 
-	# 2) dtb: rkvdec 加 rockchip,rkv-decoder-v1 (mpp_rkvdec 认的 compatible).
+	# 2) dtb: 保证 rkvdec 的 compatible 第一个串是 rockchip,rkv-decoder-rk3568。
 	#    armbian 启动用 /boot/dtb/<fdtfile>, 不是 /boot/dtb-<kernel>/.
 	local dtb_glob="${SDCARD}/boot/dtb"
 	local fdtfile
 	fdtfile="$(grep -i '^fdtfile=' "${SDCARD}/boot/armbianEnv.txt" 2>/dev/null | cut -d= -f2 | tr -d ' \t\r' || true)"
 	if [[ -z "${fdtfile}" ]]; then
-		display_alert "rockchip-multimedia" "no fdtfile in armbianEnv.txt; skipping dtb rkvdec patch" "warn"
+		display_alert "rockchip-multimedia" "no fdtfile in armbianEnv.txt; skipping dtb rkvdec check" "warn"
 		return 0
 	fi
 
@@ -429,36 +441,51 @@ MODEOF
 		return 0
 	fi
 	if ! command -v dtc >/dev/null 2>&1; then
-		display_alert "rockchip-multimedia" "dtc missing; skipping dtb rkvdec patch" "warn"
+		display_alert "rockchip-multimedia" "dtc missing; skipping dtb rkvdec check" "warn"
 		return 0
 	fi
 
-	# 已打过补丁就跳过
-	if dtc -I dtb -O dts "${dtb}" 2>/dev/null | grep -q "rkv-decoder-v1"; then
-		display_alert "rockchip-multimedia" "dtb already has rkv-decoder-v1" "info"
-		return 0
-	fi
-
+	# -@ 让 dtc 保留 __symbols__; armbian 的 boot.cmd 靠它做 dtbo 的 fdt apply。
+	# 反编译和回编译都带 -@ (注意是 -@ 这个开关, 不是给文件名加 @ 后缀 ——
+	# 后缀那种老写法会让 dtc 直接建出一个名字里带 @ 的文件)。
 	local dts_tmp
-	dts_tmp="$(mktemp)"
-	dtc -I dtb -O dts "${dtb}" > "${dts_tmp}" 2>/dev/null
-	# compatible 字符串里的 \0 分隔符在 dts 里是字面 "\0"
-	sed -i 's|compatible = "rockchip,rkv-decoder-rk3568\\0rockchip,rkv-decoder-v2";|compatible = "rockchip,rkv-decoder-v1\\0rockchip,rkv-decoder-rk3568\\0rockchip,rkv-decoder-v2";|' "${dts_tmp}"
-
-	if dtc -I dtb -O dts "${dtb}" 2>/dev/null | grep -q "rkv-decoder-v1"; then
-		: # 已含
-	elif grep -q "rkv-decoder-v1" "${dts_tmp}"; then
-		cp "${dtb}" "${dtb}.bak"
-		if dtc -I dts -O dtb -o "${dtb}" "${dts_tmp}" 2>/dev/null; then
-			display_alert "rockchip-multimedia" "patched dtb: added rkv-decoder-v1 to ${fdtfile}" "info"
-		else
-			cp "${dtb}.bak" "${dtb}"
-			display_alert "rockchip-multimedia" "failed to recompile patched dtb; restored backup" "warn"
-		fi
-	else
-		display_alert "rockchip-multimedia" "rkvdec compatible string not found in ${fdtfile}; dtb not patched" "warn"
+	dts_tmp="$(mktemp --suffix=.dts)"
+	if ! dtc -@ -I dtb -O dts -o "${dts_tmp}" "${dtb}" 2>/dev/null; then
+		display_alert "rockchip-multimedia" "dtc decompile of ${fdtfile} failed; dtb left untouched" "warn"
+		rm -f "${dts_tmp}"
+		return 0
 	fi
-	rm -f "${dts_tmp}"
+
+	# 已经是想要的样子就不动它 —— 重编译一次 dtb 毫无收益还有风险。
+	if grep -q 'compatible = "rockchip,rkv-decoder-rk3568' "${dts_tmp}"; then
+		display_alert "rockchip-multimedia" "dtb ${fdtfile}: rkvdec already on rockchip,rkv-decoder-rk3568" "info"
+		rm -f "${dts_tmp}"
+		return 0
+	fi
+
+	# compatible 字符串里的 \0 分隔符在 dts 里是字面 "\0"。
+	# 只摘掉 v1 那一个 token, 前面 "compatible = \"" 必须留着。
+	sed -i 's|rockchip,rkv-decoder-v1\\0||g' "${dts_tmp}"
+	if ! grep -q 'compatible = "rockchip,rkv-decoder-rk3568' "${dts_tmp}"; then
+		display_alert "rockchip-multimedia" "rkvdec compatible not rk3568-first after cleanup in ${fdtfile}; dtb not patched" "warn"
+		rm -f "${dts_tmp}"
+		return 0
+	fi
+
+	cp "${dtb}" "${dtb}.bak"
+	if dtc -@ -I dts -O dtb -o "${dtb}.new" "${dts_tmp}" 2>/dev/null; then
+		# 回读确认: 真正的判据是 rk3568 排第一, 而不是"跑通没报错"。
+		if dtc -I dtb -O dts "${dtb}.new" 2>/dev/null \
+			| grep -q 'compatible = "rockchip,rkv-decoder-rk3568'; then
+			mv -f "${dtb}.new" "${dtb}"
+			rm -f "${dts_tmp}"
+			display_alert "rockchip-multimedia" "patched dtb: rkvdec now rk3568-first (v1 removed) in ${fdtfile}" "info"
+			return 0
+		fi
+		display_alert "rockchip-multimedia" "patched dtb failed readback check; restored backup" "warn"
+	fi
+	rm -f "${dtb}.new" "${dts_tmp}"
+	cp "${dtb}.bak" "${dtb}"
 }
 
 # GPU access for the closed-source Mali blob.
