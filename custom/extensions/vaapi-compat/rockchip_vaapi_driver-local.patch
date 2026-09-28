@@ -1,0 +1,371 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 1627d4e..0e27cb9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -11,6 +11,10 @@ pkg_check_modules(LIBVA REQUIRED libva)
+ pkg_check_modules(LIBVA_DRM REQUIRED libva-drm)
+ pkg_check_modules(LIBDRM REQUIRED libdrm)
+ 
++# GCC 12 的 libstdc++ 没有 C++20 <format>，用 -I 目录里的 libfmt 兼容头顶上，
++# 于是所有目标都得链 fmt。
++pkg_check_modules(FMT REQUIRED fmt)
++
+ # Ensure we build shared library for the VAAPI driver
+ add_library(rockchip_drv_video SHARED
+     src/driver.cpp
+@@ -24,6 +28,7 @@ add_executable(gecko_vaapi_probe tools/gecko_vaapi_probe.cpp)
+ add_executable(panthor_egl_import_test tools/panthor_egl_import_test.cpp)
+ 
+ target_link_libraries(test_mpp_decode PRIVATE
++    ${FMT_LIBRARIES}
+     dl
+     pthread
+ )
+@@ -31,6 +36,7 @@ target_link_libraries(test_mpp_decode PRIVATE
+ target_link_libraries(vaapi_decode_test PRIVATE
+     ${LIBVA_LIBRARIES}
+     ${LIBVA_DRM_LIBRARIES}
++    ${FMT_LIBRARIES}
+     dl
+     pthread
+ )
+@@ -39,12 +45,28 @@ target_link_libraries(gecko_vaapi_probe PRIVATE
+     ${LIBVA_LIBRARIES}
+     ${LIBVA_DRM_LIBRARIES}
+     ${LIBDRM_LIBRARIES}
++    ${FMT_LIBRARIES}
++    # 必须真的把 EGL/GLES 装进 DT_NEEDED，而且不能被链接器丢掉：--as-needed 是
++    # Debian 默认，探针只 dlsym 这些符号、不直接引用，-lEGL 会被静默移除，结果
++    # libEGL 根本没被装载，RTLD_DEFAULT 里也就查不到东西。--no-as-needed 强制保留。
++    # 保留之后 ld.so 走的是 ldconfig 缓存，libEGL.so.1 解析成
++    # /usr/lib/aarch64-linux-gnu/mali/libEGL.so.1（Mali 本体，带
++    # EGL_EXT_image_dma_buf_import）；而探针原来 dlopen("/lib/.../libEGL.so.1")
++    # 拿到的是 glvnd 自己那份，转发时落到 Mesa (vendor=Mesa Project，无该扩展)。
++    "-Wl,--no-as-needed"
++    EGL
++    GLESv2
++    "-Wl,--as-needed"
++    # GBM 平台: EGL_PLATFORM_GBM_KHR 需要 libgbm 建 gbm_device，
++    # 探针要靠它 headless 拿到 Mali EGL。
++    gbm
+     dl
+     pthread
+ )
+ 
+ target_link_libraries(panthor_egl_import_test PRIVATE
+     ${LIBDRM_LIBRARIES}
++    ${FMT_LIBRARIES}
+     dl
+     pthread
+ )
+@@ -113,6 +135,7 @@ target_include_directories(rockchip_drv_video PRIVATE
+ target_link_libraries(rockchip_drv_video PRIVATE
+     ${LIBVA_LIBRARIES}
+     ${LIBDRM_LIBRARIES}
++    ${FMT_LIBRARIES}
+     dl
+     pthread
+ )
+diff --git a/src/driver.cpp b/src/driver.cpp
+index 8c82f1f..0161ea8 100644
+--- a/src/driver.cpp
++++ b/src/driver.cpp
+@@ -1325,9 +1325,10 @@ static bool isSupportedProfile(VAProfile profile) {
+         case VAProfileHEVCMain:
+         case VAProfileHEVCMain10:
+         case VAProfileVP9Profile0:
+-        case VAProfileAV1Profile0:
+             return true;
+         default:
++            // AV1 不在这里: RK3568 的 MPP 报 "unable to create dec av1 for
++            // soc rk3568 unsupported", 宣称支持只会让客户端拿到必然失败的 profile。
+             return false;
+     }
+ }
+@@ -1383,7 +1384,13 @@ static VAStatus vaCreateSurfaces1(VADriverContextP ctx,
+             case VASurfaceAttribUsageHint:
+             case VASurfaceAttribExternalBufferDescriptor:
+             case VASurfaceAttribDRMFormatModifiers:
+-                if (attr.value.type != VAGenericValueTypeInteger) {
++                // 这几个属性都是整数语义。ffmpeg 的 libavutil 只填 .type 和
++                // .value.value.i，.value.type 和 .flags 都被它自己的 memset 留成 0；
++                // 而这块板子上 Rockchip 改过的 va.h 里 VAGenericValueType 从 1
++                // 开始（没有 None=0），所以 value.type==0 只表示"没填"，不是非法值。
++                // 之前这里非 Integer 就直接报 INVALID_PARAMETER，导致 ffmpeg
++                // 建 surface 必失败（Failed to create surface: 18）。按整数读即可。
++                if (attr.value.type != VAGenericValueTypeInteger && attr.value.type != 0) {
+                     if (attr.type == VASurfaceAttribPixelFormat || attr.type == VASurfaceAttribMemoryType || attr.type == VASurfaceAttribUsageHint) {
+                         return VA_STATUS_ERROR_INVALID_PARAMETER;
+                     }
+@@ -1537,7 +1544,6 @@ static VAStatus vaQueryConfigProfiles(VADriverContextP ctx,
+         VAProfileH264High,
+         VAProfileHEVCMain,
+         VAProfileHEVCMain10,
+-        VAProfileAV1Profile0,
+         VAProfileVP9Profile0,
+     };
+     const int supported_count = static_cast<int>(std::size(supported));
+@@ -2697,6 +2703,150 @@ static VAStatus vaExportSurfaceHandle(VADriverContextP ctx,
+     return VA_STATUS_SUCCESS;
+ }
+ 
++// ---------------------------------------------------------------------------
++// 下面这些是 VADriverVTable 里原本没人填的槽位。vtable 是按成员指针逐个写的
++// （vt->*member_ptr = fn），所以顺序本身不会错位；但不填的槽位是 calloc 出来的
++// NULL，客户端一旦调到就是跳空指针segfault，而不是拿到一个干净的错误码。
++// 这里把它们注册成明确的 no-op，让不支持的能力返回 VA_STATUS_ERROR_UNIMPLEMENTED。
++// 其中 vaBufferInfo 是真的实现了（读 d->buffers），vaQueryProcessingRate 返回 0
++// 表示不限速率——MPP 的实时性由驱动自己节流，客户端不点帧率时不该被拒。
++// ---------------------------------------------------------------------------
++
++static VAStatus vaPutSurface(VADriverContextP ctx,
++                             VASurfaceID surface,
++                             void* draw,
++                             short srcx,
++                             short srcy,
++                             unsigned short srcw,
++                             unsigned short srch,
++                             short destx,
++                             short desty,
++                             unsigned short destw,
++                             unsigned short desth,
++                             VARectangle* cliprects,
++                             unsigned int number_cliprects,
++                             unsigned int flags) {
++    // 窗口系统呈现不走 VAAPI，交给 EGL/GBM 或合成器处理。
++    (void)ctx; (void)surface; (void)draw; (void)srcx; (void)srcy;
++    (void)srcw; (void)srch; (void)destx; (void)desty; (void)destw;
++    (void)desth; (void)cliprects; (void)number_cliprects; (void)flags;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaBufferInfo(VADriverContextP ctx,
++                             VABufferID buf_id,
++                             VABufferType* type,
++                             unsigned int* size,
++                             unsigned int* num_elements) {
++    if (!ctx) return VA_STATUS_ERROR_INVALID_CONTEXT;
++    if (!type || !size || !num_elements) return VA_STATUS_ERROR_INVALID_PARAMETER;
++    auto* d = toDriver(ctx);
++    if (!d) return VA_STATUS_ERROR_INVALID_CONTEXT;
++    std::lock_guard<std::mutex> lock(d->lock);
++    auto it = d->buffers.find(buf_id);
++    if (it == d->buffers.end()) return VA_STATUS_ERROR_INVALID_BUFFER;
++    *type = it->second->type;
++    *size = static_cast<unsigned int>(it->second->size_bytes());
++    *num_elements = it->second->num_elements;
++    return VA_STATUS_SUCCESS;
++}
++
++static VAStatus vaLockSurface(VADriverContextP ctx,
++                              VASurfaceID surface,
++                              unsigned int* fourcc,
++                              unsigned int* luma_stride,
++                              unsigned int* chroma_u_stride,
++                              unsigned int* chroma_v_stride,
++                              unsigned int* luma_offset,
++                              unsigned int* chroma_u_offset,
++                              unsigned int* chroma_v_offset,
++                              unsigned int* buffer_name,
++                              void** buffer) {
++    // libva 2.x 已经删掉 vaMapSurface/vaUnmapSurface，没有客户端会走到这里。
++    (void)ctx; (void)surface; (void)fourcc; (void)luma_stride;
++    (void)chroma_u_stride; (void)chroma_v_stride; (void)luma_offset;
++    (void)chroma_u_offset; (void)chroma_v_offset; (void)buffer_name;
++    (void)buffer;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaUnlockSurface(VADriverContextP ctx, VASurfaceID surface) {
++    (void)ctx; (void)surface;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaAcquireBufferHandle(VADriverContextP ctx,
++                                      VABufferID buf_id,
++                                      VABufferInfo* buf_info) {
++    (void)ctx; (void)buf_id; (void)buf_info;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaReleaseBufferHandle(VADriverContextP ctx,
++                                      VABufferID buf_id) {
++    (void)ctx; (void)buf_id;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++// 注意这几个 MF 槽位在 Rockchip 这份 va_backend.h 里的参数和上游 libva 不一样
++// （vaCreateMFContext 只要 2 个参数，vaMFReleaseContext 要 3 个，vaMFSubmit 要 4 个），
++// 照上游签名写会直接编译不过。
++static VAStatus vaCreateMFContext(VADriverContextP ctx,
++                                  VAMFContextID* mfe_context) {
++    (void)ctx; (void)mfe_context;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaMFAddContext(VADriverContextP ctx,
++                               VAMFContextID mf_context,
++                               VAContextID context) {
++    (void)ctx; (void)mf_context; (void)context;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaMFReleaseContext(VADriverContextP ctx,
++                                   VAMFContextID mf_context,
++                                   VAContextID context) {
++    (void)ctx; (void)mf_context; (void)context;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaMFSubmit(VADriverContextP ctx,
++                           VAMFContextID mf_context,
++                           VAContextID* contexts,
++                           int num_contexts) {
++    (void)ctx; (void)mf_context; (void)contexts; (void)num_contexts;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaQueryProcessingRate(VADriverContextP ctx,
++                                       VAConfigID config_id,
++                                       VAProcessingRateParameter* proc_buf,
++                                       unsigned int* processing_rate) {
++    (void)config_id; (void)proc_buf;
++    if (!ctx) return VA_STATUS_ERROR_INVALID_CONTEXT;
++    if (!processing_rate) return VA_STATUS_ERROR_INVALID_PARAMETER;
++    // 0 = 不限速率（VAProcessingRate_None）。MPP 解码器的实时性由驱动内部节流，
++    // 客户端不请求具体帧率时不应被拒。
++    *processing_rate = 0;
++    return VA_STATUS_SUCCESS;
++}
++
++static VAStatus vaSyncBuffer(VADriverContextP ctx,
++                             VABufferID buf_id,
++                             uint64_t timeout_ns) {
++    (void)ctx; (void)buf_id; (void)timeout_ns;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
++static VAStatus vaCopy(VADriverContextP ctx,
++                       VACopyObject* dst,
++                       VACopyObject* src,
++                       VACopyOption option) {
++    (void)ctx; (void)dst; (void)src; (void)option;
++    return VA_STATUS_ERROR_UNIMPLEMENTED;
++}
++
+ static VAStatus vaQueryImageFormats(VADriverContextP ctx,
+                                     VAImageFormat* format_list,
+                                     int* num_formats) {
+@@ -3582,9 +3732,9 @@ static constexpr auto make_vtable_entries_template() {
+         make_entry<&T::vaDestroySurfaces>(vaDestroySurfaces),
+         make_entry<&T::vaCreateContext>(vaCreateContext),
+         make_entry<&T::vaDestroyContext>(vaDestroyContext),
+-        make_entry<&T::vaQuerySurfaceAttributes>(vaQuerySurfaceAttributes),
+         make_entry<&T::vaGetSurfaceAttributes>(vaGetSurfaceAttributes),
+         make_entry<&T::vaCreateSurfaces2>(vaCreateSurfaces2),
++        make_entry<&T::vaQuerySurfaceAttributes>(vaQuerySurfaceAttributes),
+         make_entry<&T::vaCreateBuffer>(vaCreateBuffer),
+         make_entry<&T::vaBufferSetNumElements>(vaBufferSetNumElements),
+         make_entry<&T::vaMapBuffer>(vaMapBuffer),
+@@ -3614,6 +3764,20 @@ static constexpr auto make_vtable_entries_template() {
+         make_entry<&T::vaQueryDisplayAttributes>(vaQueryDisplayAttributes),
+         make_entry<&T::vaGetDisplayAttributes>(vaGetDisplayAttributes),
+         make_entry<&T::vaSetDisplayAttributes>(vaSetDisplayAttributes),
++        // 原本空着的槽位：注册成明确的 no-op，避免客户端调到 NULL 跳空指针。
++        make_entry<&T::vaBufferInfo>(vaBufferInfo),
++        make_entry<&T::vaLockSurface>(vaLockSurface),
++        make_entry<&T::vaUnlockSurface>(vaUnlockSurface),
++        make_entry<&T::vaPutSurface>(vaPutSurface),
++        make_entry<&T::vaAcquireBufferHandle>(vaAcquireBufferHandle),
++        make_entry<&T::vaReleaseBufferHandle>(vaReleaseBufferHandle),
++        make_entry<&T::vaCreateMFContext>(vaCreateMFContext),
++        make_entry<&T::vaMFAddContext>(vaMFAddContext),
++        make_entry<&T::vaMFReleaseContext>(vaMFReleaseContext),
++        make_entry<&T::vaMFSubmit>(vaMFSubmit),
++        make_entry<&T::vaQueryProcessingRate>(vaQueryProcessingRate),
++        make_entry<&T::vaSyncBuffer>(vaSyncBuffer),
++        make_entry<&T::vaCopy>(vaCopy),
+         make_entry<&T::vaExportSurfaceHandle>(vaExportSurfaceHandle)};
+ }
+ 
+diff --git a/src/mpp_decoder.cpp b/src/mpp_decoder.cpp
+index d382dd7..687e58d 100644
+--- a/src/mpp_decoder.cpp
++++ b/src/mpp_decoder.cpp
+@@ -235,8 +235,12 @@ bool MppDecoder::initialize(CodecProfile profile, int width, int height, int drm
+     profile_ = profile;
+     if (session_initialized_) return true;
+ 
+-    stable_export_enabled_ = envEnabled("ROCKCHIP_VAAPI_STABLE_EXPORT") ||
+-                             (profile == CodecProfile::HEVC && !envEnabled("ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT"));
++    // 默认一律降级到 stable_export：每帧 memcpy 进驱动自有的常驻 DRM 缓冲再导出。
++    // 零拷贝（把 MPP 帧缓冲的 fd 直接 dup 出去）在这块板的 Mali x11-gbm + Xorg
++    // 显示栈上不成立，dmabuf 进不了合成器。
++    // ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT=1 可以退回零拷贝。
++    static const bool disable_stable_export = envEnabled("ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT");
++    stable_export_enabled_ = envEnabled("ROCKCHIP_VAAPI_STABLE_EXPORT") || !disable_stable_export;
+ 
+     struct stat stat_buf = {};
+     if (drm_fd < 0 || fstat(drm_fd, &stat_buf) != 0 || !S_ISCHR(stat_buf.st_mode) || major(stat_buf.st_rdev) != 226 || minor(stat_buf.st_rdev) < 128) {
+@@ -383,8 +387,13 @@ bool MppDecoder::getSurfaceDebugInfo(VASurfaceID id,
+ }
+ 
+ std::string MppDecoder::getPendingQueueSummary(VASurfaceID focus_surface) {
+-    std::ostringstream stream;
+     std::lock_guard<std::mutex> lock(pending_mutex_);
++    return getPendingQueueSummaryLocked(focus_surface);
++}
++
++std::string MppDecoder::getPendingQueueSummaryLocked(VASurfaceID focus_surface) {
++    // 调用方已经持有 pending_mutex_，这里绝对不能再加锁。
++    std::ostringstream stream;
+ 
+     size_t focus_matches = 0;
+     uint64_t focus_latest_job_id = 0;
+@@ -1302,7 +1311,13 @@ void MppDecoder::outputThreadMain(std::stop_token st) {
+             continue;
+         }
+ 
+-        bool is_error = mpp_frame_get_errinfo(frame) || mpp_frame_get_discard(frame);
++        // RK3568 上 MPP 会在**成功解出**的帧上残留 errinfo（实测恒为 10，
++        // 偶发 100），Rockchip 自带的 mpi_dec_test 也是 "decode 30 frames"
++        // 全成功却每帧 err 10。所以默认不信 errinfo，只认 discard；
++        // 需要严格判错时设 ROCKCHIP_VAAPI_STRICT_ERRINFO=1。
++        static const bool strict_errinfo = envEnabled("ROCKCHIP_VAAPI_STRICT_ERRINFO");
++        bool is_error = mpp_frame_get_discard(frame) ||
++                        (strict_errinfo && mpp_frame_get_errinfo(frame));
+         bool is_eos_frame = mpp_frame_get_eos(frame);
+ 
+         const MppBuffer frame_buffer = mpp_frame_get_buffer(frame);
+@@ -1398,7 +1413,7 @@ void MppDecoder::outputThreadMain(std::stop_token st) {
+                             util::log(util::stderr_sink, util::LogLevel::Warn,
+                                       "mpp: orphan frame pts={} has no pending surface match {}",
+                                       static_cast<long long>(frame_pts),
+-                                      getPendingQueueSummary());
++                                      getPendingQueueSummaryLocked());
+                         }
+                     }
+                 }
+@@ -1413,7 +1428,7 @@ void MppDecoder::outputThreadMain(std::stop_token st) {
+                               "mpp: outputThread fallback-mapped frame pts={} to oldest pending surface={} {}",
+                               static_cast<long long>(frame_pts),
+                               surface_id,
+-                              getPendingQueueSummary(surface_id));
++                              getPendingQueueSummaryLocked(surface_id));
+                 }
+             }
+         }
+diff --git a/src/mpp_decoder.h b/src/mpp_decoder.h
+index 82c02e9..8e75bba 100644
+--- a/src/mpp_decoder.h
++++ b/src/mpp_decoder.h
+@@ -77,6 +77,9 @@ class MppDecoder {
+     bool waitSurfaceReady(VASurfaceID surface, uint32_t timeout_ms = 60000);
+     bool getSurfaceDebugInfo(VASurfaceID id, uint64_t& last_submitted_job_id, uint64_t& last_completed_job_id, uint64_t& last_submit_us, uint64_t& last_complete_us);
+     std::string getPendingQueueSummary(VASurfaceID focus_surface = VA_INVALID_ID);
++    // 调用方必须已经持有 pending_mutex_。那个 mutex 是非递归的，在持锁的代码
++    // 路径里再调 getPendingQueueSummary() 会自己把自己锁死（输出线程就死在这）。
++    std::string getPendingQueueSummaryLocked(VASurfaceID focus_surface = VA_INVALID_ID);
+     bool requestTailDrainEos(VASurfaceID focus_surface, uint32_t min_idle_ms);
+     bool abandonStalledPendingSurface(VASurfaceID focus_surface, uint32_t min_idle_ms);
+     bool abandonTailPendingSurface(VASurfaceID focus_surface, uint32_t min_idle_ms);

@@ -48,10 +48,25 @@ function _rmm_pinned_versions() {
 	EXT_RGA_REF="v1.10.0"
 	EXT_RKNN_GIT="https://github.com/rockchip-linux/rknn-toolkit2.git"
 	EXT_RKNN_REF="v1.6.0"  # latest release tag
-	# VA 驱动: woodyst/rockchip-vaapi 通过 MPP 实现完整硬件解码 (H264/HEVC/VP9),
-	# 注册 VAEntrypointVLD 解码入口; 旧 kleopatra999 版只有编码.
-	EXT_VADRV_GIT="https://github.com/woodyst/rockchip-vaapi.git"
-	EXT_VADRV_REF="master"
+	# VA 驱动: sfqr0414/rockchip_vaapi_driver, C++20 + CMake, 经 MPP 拿帧的
+	# dma-buf fd 直接导出, 有真正的零拷贝开关 ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT=1
+	# (mpp_decoder.cpp: stable_export_enabled_), 并且原生导出 __vaDriverInit_1_0
+	# (driver.cpp 的 extern "C" __vaDriverInit_1_0), libva 1.17/2.x 都能 dlopen。
+	#
+	# 换掉之前那个 woodyst/rockchip-vaapi 的两个理由:
+	#   1. 它只有"每帧 memcpy 进驱动自有常驻 DRM 缓冲"一种导出方式, 根本没有零拷贝;
+	#   2. 它其实一次都没编进过镜像。构建容器是 Ubuntu jammy arm64, 装的是
+	#      libva-dev:arm64 2.14; 而它 Makefile 里硬写的 -lrockchip_mpp 找不到库
+	#      —— 旧代码把 LIBRARY_PATH 拼成了 stage/mpp/usr/usr/lib/... (lib_dir 本身
+	#      已经是 "usr/lib/aarch64-linux-gnu", 再叠 ${prefix} 就成了 usr/usr)。
+	#      日志里那行 "VA-API driver build failed" 只是 warn, 镜像照样出, 于是
+	#      /usr/lib/aarch64-linux-gnu/dri/rockchip_drv_video.so 一直是空的。
+	#      现在改成硬失败, 编不出来就不让镜像出去。
+	#
+	# 按 commit 钉死而不是 master: 这份补丁是照着 f120c5e 生成的, 上游一改就
+	# 可能对不上, 到时候构建会直接失败而不是悄悄编出一个行为不明的驱动。
+	EXT_VADRV_GIT="https://github.com/sfqr0414/rockchip_vaapi_driver.git"
+	EXT_VADRV_REF="f120c5e855aa5f4e4856ec473aa0abf0c53567d8"
 
 	# Mali-G52 (Bifrost, CSF) is installed from the .deb produced by
 	# build-with-mali.yml during the formal pre_customize_image hook.
@@ -139,7 +154,21 @@ function _rockchip_multimedia_fetch_pinned() {
 	local git_ref="$2"
 	local dst_dir="$3"
 
-	if [[ -d "${dst_dir}/.git" ]]; then
+	# 40 位 commit SHA: git clone --branch 只认 tag/branch, 传 SHA 会报
+	# "Remote branch <sha> not found", 而它的兜底 clone 拉的是默认分支 HEAD,
+	# 于是钉版本等于没钉。GitHub 允许按 SHA 取 (allowReachableSHA1InWant),
+	# 所以这里 clone 后再 fetch --depth 1 那个 SHA。
+	if [[ "${git_ref}" =~ ^[0-9a-f]{40}$ ]]; then
+		if [[ -d "${dst_dir}/.git" ]]; then
+			git -C "${dst_dir}" fetch --depth 1 origin "${git_ref}" && \
+				git -C "${dst_dir}" checkout -q FETCH_HEAD
+		else
+			rm -rf "${dst_dir}"
+			git clone --filter=blob:none "${git_url}" "${dst_dir}" && \
+				git -C "${dst_dir}" fetch --depth 1 origin "${git_ref}" && \
+				git -C "${dst_dir}" checkout -q FETCH_HEAD
+		fi
+	elif [[ -d "${dst_dir}/.git" ]]; then
 		cd "${dst_dir}"
 		git fetch --depth 1 origin "${git_ref}" 2>/dev/null || true
 		git checkout FETCH_HEAD 2>/dev/null || git checkout "${git_ref}" 2>/dev/null || true
@@ -153,6 +182,17 @@ function _rockchip_multimedia_fetch_pinned() {
 	if [[ ! -f "${dst_dir}/README.md" && ! -f "${dst_dir}/CMakeLists.txt" && ! -f "${dst_dir}/meson.build" ]]; then
 		display_alert "rockchip-multimedia" "Failed to fetch ${git_url}@${git_ref}" "err"
 		return 1
+	fi
+
+	# 钉的是 SHA 的话, 确认真的 checkout 到了那个 commit —— fetch 失败但
+	# clone 成功时会静默停在默认分支上, 补丁多半对不上, 早失败比晚失败好。
+	if [[ "${git_ref}" =~ ^[0-9a-f]{40}$ ]]; then
+		local got
+		got="$(git -C "${dst_dir}" rev-parse HEAD 2>/dev/null || echo none)"
+		if [[ "${got}" != "${git_ref}" ]]; then
+			display_alert "rockchip-multimedia" "pinned ${git_ref} but HEAD is ${got}" "err"
+			return 1
+		fi
 	fi
 }
 
@@ -287,68 +327,153 @@ function _rockchip_multimedia_build_rknn() {
 }
 
 # ============================================================ VA-API --
+# 找 extensions/vaapi-compat/ 目录 (补丁 + <format> 兼容头都在里面)。
+# 和上面找 mali-repo 用的是同一套候选路径, 因为 custom/extensions/ 会被 rsync
+# 到 build/extensions/, 而 SRC 指向的正是那个 build 树。
+function _rockchip_multimedia_find_vaapi_compat() {
+	local _c
+	for _c in \
+		"${SRC:-}/extensions/vaapi-compat" \
+		/armbian/extensions/vaapi-compat \
+		"${SRC:-}/custom/extensions/vaapi-compat" \
+		/armbian/custom/extensions/vaapi-compat \
+		"$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/vaapi-compat"
+	do
+		[[ -n "${_c}" && -d "${_c}" ]] || continue
+		[[ -f "${_c}/format" && -f "${_c}/rockchip_vaapi_driver-local.patch" ]] || continue
+		echo "${_c}"
+		return 0
+	done
+	return 1
+}
+
 function _rockchip_multimedia_build_vaapi() {
 	_rmm_init
-	local src_dir="${work_dir}/src/libva-rkmpp"
+	local src_dir="${work_dir}/src/rockchip_vaapi_driver"
+	local build_dir="${work_dir}/build/rockchip_vaapi_driver"
 	local stage_dir="${work_dir}/stage/libva-rkmpp"
 
 	_rockchip_multimedia_fetch_pinned "${EXT_VADRV_GIT}" "${EXT_VADRV_REF}" "${src_dir}" || return 1
 
-	# woodyst/rockchip-vaapi: VA-API -> MPP 桥接, 注册 VLD 解码 (H264/HEVC/VP9).
-	# 依赖 libva 头文件 + librockchip_mpp (上一步已装).
-	if ! pkg-config --exists libva 2>/dev/null; then
-		display_alert "rockchip-multimedia" "installing libva dev package for VA-API build" "info"
-		apt-get -qq update -y && apt-get -qq install -y libva-dev
+	# 板上验证过的本地修补。内容全是板上跑出来的问题, 不是可选优化:
+	#   * vtable 里原本没人填的槽位补成 no-op —— 原样是 calloc 出来的 NULL,
+	#     客户端调到就是跳空指针;
+	#   * vaQuerySurfaceAttributes / vaGetSurfaceAttributes 在 vtable 里位置写反了;
+	#   * ffmpeg 的 libavutil 建 surface 时不填 attr.value.type, 而这块板的
+	#     VAGenericValueType 从 1 开始, 于是 value.type==0 被当成非法值拒掉;
+	#   * RK3568 上 MPP 会在**成功解出**的帧上残留 errinfo (实测恒为 10), 默认不信它;
+	#   * 输出线程在持 pending_mutex_ 的路径里再调 getPendingQueueSummary() 会自死锁;
+	#   * AV1 profile 不再对外宣称支持 (MPP 报 "unable to create dec av1 for soc rk3568");
+	#   * 默认走 stable-export, ROCKCHIP_VAAPI_DISABLE_STABLE_EXPORT=1 才切真零拷贝;
+	#   * CMakeLists 链 fmt (下面那个 <format> 兼容头要它)。
+	# 补丁是照 ${EXT_VADRV_REF} 那个 commit 生成的; 重复跑构建时已经在树上就跳过。
+	local compat_dir
+	compat_dir="$(_rockchip_multimedia_find_vaapi_compat || true)"
+	if [[ -z "${compat_dir}" ]]; then
+		exit_with_error "rockchip-multimedia: extensions/vaapi-compat/ not found (needs format + rockchip_vaapi_driver-local.patch)"
 	fi
-
-	# MPP 库已 staged, 链接时指过去
-	local mpp_stage="${work_dir}/stage/mpp"
-	if [[ -d "${mpp_stage}${prefix}/${lib_dir}" ]]; then
-		export LIBRARY_PATH="${mpp_stage}${prefix}/${lib_dir}:${LIBRARY_PATH:-}"
-		export LD_LIBRARY_PATH="${mpp_stage}${prefix}/${lib_dir}:${LD_LIBRARY_PATH:-}"
-		export PKG_CONFIG_PATH="${mpp_stage}${prefix}/${lib_dir}/pkgconfig:${PKG_CONFIG_PATH:-}"
-	fi
-
-	# MPP 头文件装在 staging 目录 (不落宿主 /usr/include), 必须显式指给 Makefile.
-	# Makefile 用 := 硬编码 CFLAGS, 命令行传 CFLAGS 会覆盖 pkg-config 的 libva include,
-	# 所以直接在 Makefile 里追加 include 路径.
-	local mpp_inc="${mpp_stage}${prefix}/include"
-	if [[ -d "${mpp_inc}/rockchip" ]]; then
-		sed -i "s|-I/usr/include/rockchip|-I${mpp_inc} -I${mpp_inc}/rockchip -I/usr/include/rockchip|" "${src_dir}/Makefile"
-		display_alert "rockchip-multimedia" "patched Makefile include path -> ${mpp_inc}" "info"
-	fi
-
-	# woodyst/rockchip-vaapi 面向 libva 2.x (VA-API 1.20), Debian bookworm 是 libva 1.17:
-	#   1. VAProfileH264High10 枚举在 libva 1.17 里不存在 (2.x 才加), 编译报 undeclared.
-	#      用一个不冲突的占位值 (0x1000), 让 case 分支编过去; RK3568 硬件没有 High10 解码,
-	#      占位值不会真的被走到.
-	#      注意: 不能用 VAProfileH264StereoHigh+1, 那样会撞上 VAProfileHEVCMain=17 (duplicate case).
-	#   2. 驱动只导出 __vaDriverInit_1_20, 而 libva 1.17 dlopen 后找 __vaDriverInit_1_0,
-	#      "has no function __vaDriverInit_1_0" -> 加薄别名.
-	if ! grep -q "libva < 2.0 lacks High10" "${src_dir}/src/h264.h"; then
-		sed -i "/#include <va\/va.h>/a #include <va/va_compat.h>\n\n/* libva < 2.0 lacks High10 profile enum */\n#ifndef VAProfileH264High10\n#define VAProfileH264High10 (0x1000)\n#endif" "${src_dir}/src/h264.h"
-	fi
-	if ! grep -q "__vaDriverInit_1_0" "${src_dir}/src/rockchip_drv_video.c"; then
-		cat >> "${src_dir}/src/rockchip_drv_video.c" <<'VAEOF'
-
-/* libva < 2.0 (Debian bookworm = 1.17) looks up __vaDriverInit_1_0, but this
- * driver only exports __vaDriverInit_1_20. Provide a thin alias. */
-extern VAStatus __vaDriverInit_1_20(VADriverContextP ctx);
-VAStatus __vaDriverInit_1_0(VADriverContextP ctx) { return __vaDriverInit_1_20(ctx); }
-VAEOF
-	fi
-
-	cd "${src_dir}"
-	# 目标名与旧驱动一致, 直接覆盖只有编码的 rockchip_drv_video.so
-	local va_out="rockchip_drv_video.so"
-	if make -j"$(nproc)" CC="${CC}" 2>&1; then
-		mkdir -p "${stage_dir}${prefix}/${lib_dir}/dri"
-		install -m 755 "${va_out}" "${stage_dir}${prefix}/${lib_dir}/dri/${va_out}"
-		rsync -av "${stage_dir}/" "${SDCARD}/"
-		display_alert "rockchip-multimedia" "VA-API decode driver installed (${va_out})" "info"
+	if git -C "${src_dir}" apply --reverse --check "${compat_dir}/rockchip_vaapi_driver-local.patch" 2>/dev/null; then
+		display_alert "rockchip-multimedia" "VA driver local patch already applied" "info"
+	elif ! git -C "${src_dir}" apply --check "${compat_dir}/rockchip_vaapi_driver-local.patch" 2>/dev/null; then
+		exit_with_error "rockchip-multimedia: cannot apply ${compat_dir}/rockchip_vaapi_driver-local.patch to ${EXT_VADRV_REF}"
 	else
-		display_alert "rockchip-multimedia" "VA-API driver build failed; MPP remains the video path" "warn"
+		git -C "${src_dir}" apply "${compat_dir}/rockchip_vaapi_driver-local.patch"
+		display_alert "rockchip-multimedia" "applied VA driver local patch -> ${src_dir}" "info"
 	fi
+
+	# 构建依赖。libva 是构建容器 (Ubuntu jammy arm64) 的 2.14, 原生带
+	# VAProfileH264High10, 驱动也按 2.x 的 va_backend.h 写, 不需要任何占位补丁。
+	local va_pkgs=()
+	local p
+	for p in cmake pkg-config g++ make libva-dev libva-drm-dev libdrm-dev libfmt-dev; do
+		dpkg -s "${p}" >/dev/null 2>&1 || va_pkgs+=("${p}")
+	done
+	if [[ ${#va_pkgs[@]} -gt 0 ]]; then
+		display_alert "rockchip-multimedia" "installing VA driver build deps: ${va_pkgs[*]}" "info"
+		apt-get -qq update -y >/dev/null 2>&1 || true
+		# 编不出驱动就别让镜像出去: 之前 woodyst 那版是 warn, 结果镜像里
+		# 一直没有 rockchip_drv_video.so, 板子上才发现。
+		apt-get -qq install -y "${va_pkgs[@]}" || \
+			exit_with_error "rockchip-multimedia: failed to install VA driver build deps: ${va_pkgs[*]}"
+	fi
+
+	# MPP 是上一步 DESTDIR staged 的, 没进宿主 /usr。注意 lib_dir 本身就是
+	# "usr/lib/aarch64-linux-gnu" 这个相对路径, 再叠 ${prefix} 会拼出
+	# usr/usr/lib/... —— 之前 woodyst 那版就是这么把 -lrockchip_mpp 弄丢的。
+	local mpp_stage="${work_dir}/stage/mpp"
+	local mpp_lib_dir="${mpp_stage}/${lib_dir}"
+	local mpp_inc_dir="${mpp_stage}${prefix}/include/rockchip"
+	[[ -f "${mpp_inc_dir}/rk_mpi.h" ]] || \
+		exit_with_error "rockchip-multimedia: ${mpp_inc_dir}/rk_mpi.h missing (MPP build stage incomplete)"
+	[[ -f "${mpp_lib_dir}/librockchip_mpp.so" ]] || \
+		exit_with_error "rockchip-multimedia: ${mpp_lib_dir}/librockchip_mpp.so missing (MPP build stage incomplete)"
+	export LIBRARY_PATH="${mpp_lib_dir}:${LIBRARY_PATH:-}"
+	export LD_LIBRARY_PATH="${mpp_lib_dir}:${LD_LIBRARY_PATH:-}"
+
+	# <format> 垫头: 构建容器的 g++ 是 jammy 的 11 (板子上是 12), libstdc++ 都
+	# 没有 C++20 <format>, 而 src/util/log.h 是驱动本体的头, 跑不掉。
+	# 兼容头用 libfmt 实现那几个 API, 靠 -I 的搜索顺序抢在系统头前面。
+	# 于是所有目标都得链 fmt —— 补丁里的 CMakeLists 已经加了。
+	local compat_inc="${work_dir}/vaapi-compat-include"
+	rm -rf "${compat_inc}"
+	mkdir -p "${compat_inc}"
+	install -m 644 "${compat_dir}/format" "${compat_inc}/format"
+	# Debian/Ubuntu 的 libdrm 把头装在 /usr/include/libdrm/, 没有 /usr/include/drm/
+	# 这一层, 而驱动按 libdrm 官方布局 include <drm/drm_fourcc.h>。
+	if [[ ! -d /usr/include/drm ]]; then
+		[[ -d /usr/include/libdrm ]] || exit_with_error "rockchip-multimedia: libdrm headers not found under /usr/include"
+		ln -sfn /usr/include/libdrm "${compat_inc}/drm"
+	fi
+
+	rm -rf "${build_dir}"
+	mkdir -p "${build_dir}"
+	cd "${build_dir}" || return 1
+
+	cmake "${src_dir}" \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_C_COMPILER="${CC}" \
+		-DCMAKE_CXX_COMPILER="${CXX}" \
+		-DCMAKE_C_FLAGS="-I${compat_inc}" \
+		-DCMAKE_CXX_FLAGS="-I${compat_inc}" \
+		-DROCKCHIP_MPP_LIB="${mpp_lib_dir}/librockchip_mpp.so" \
+		-DROCKCHIP_MPP_INCLUDE="${mpp_inc_dir}" \
+		|| exit_with_error "rockchip-multimedia: cmake configure failed for ${src_dir}"
+
+	# 只编驱动本体。tools/ 下那几个探针要 EGL/GLES/gbm 头, 那是板上排查 Firefox
+	# 时用的, 跟镜像无关; 全量 make 会因为它们编不出来。
+	cmake --build . --target rockchip_drv_video -j"$(nproc)" \
+		|| exit_with_error "rockchip-multimedia: rockchip_drv_video build failed"
+
+	local va_out="${build_dir}/rockchip_drv_video.so"
+	[[ -f "${va_out}" ]] || exit_with_error "rockchip-multimedia: ${va_out} not produced"
+
+	# 门禁一: libva 靠 dlopen 找 __vaDriverInit_1_0 拿驱动入口。少了它就是
+	# "vaInitialize: va_openDriver() failed" —— 板子上 Firefox 加载失败过一次。
+	nm -D --defined-only "${va_out}" | grep -q " __vaDriverInit_1_0$" || \
+		exit_with_error "rockchip-multimedia: ${va_out} does not export __vaDriverInit_1_0"
+
+	# 门禁二: 别把带 not found 的库塞进镜像。构建容器本身就是 arm64, 未必装了
+	# aarch64-linux-gnu-* 那套交叉 binutils, 两个名字都试一遍。
+	local readelf_bin=""
+	for _t in objdump aarch64-linux-gnu-objdump; do
+		command -v "${_t}" >/dev/null 2>&1 && { readelf_bin="${_t}"; break; }
+	done
+	local missing_libs=""
+	if [[ -n "${readelf_bin}" ]]; then
+		missing_libs="$("${readelf_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}' | while read -r _l; do
+			[[ -f "${mpp_lib_dir}/${_l}" || -e "/usr/lib/aarch64-linux-gnu/${_l}" ]] || echo "${_l}"
+		done)"
+	fi
+	[[ -z "${missing_libs}" ]] || \
+		exit_with_error "rockchip-multimedia: unresolved DT_NEEDED: ${missing_libs}"
+
+	# lib_dir 已经是 "usr/lib/aarch64-linux-gnu" 这个相对路径, 这里再叠
+	# ${prefix} 会得到 usr/usr/lib/... , rsync 进 rootfs 之后驱动就落在
+	# /usr/usr/lib/... 下面, libva 照样找不到。跟上面 RKNN 那段一个写法。
+	mkdir -p "${stage_dir}/${lib_dir}/dri"
+	install -m 755 "${va_out}" "${stage_dir}/${lib_dir}/dri/rockchip_drv_video.so"
+	rsync -av "${stage_dir}/" "${SDCARD}/"
+	display_alert "rockchip-multimedia" "VA-API driver installed: usr/${lib_dir}/dri/rockchip_drv_video.so ($(stat -c '%s' "${va_out}") bytes)" "info"
 }
 
 # ============================================================ Hooks --

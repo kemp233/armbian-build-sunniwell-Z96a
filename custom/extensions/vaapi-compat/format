@@ -1,0 +1,147 @@
+// GCC 12 的 libstdc++ 没有 C++20 <format>，也没有 <chrono> 的时区支持。
+// rockchip_vaapi_driver 只用到 std::format / std::vformat /
+// std::basic_format_string / std::formatter / std::make_format_args
+// 和 std::chrono::zoned_time 这一小撮，这里用 libfmt 顶上。
+// 放在 -I 目录里，靠搜索顺序抢在系统头文件前面。
+#pragma once
+
+#include <algorithm>
+#include <chrono>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+
+#include <fmt/chrono.h>
+#include <fmt/format.h>
+
+// log.h 里的 ostream 回退包装，日志系统靠它打印枚举和自定义结构体。
+// 这里只前向声明，具体定义仍由 log.h 提供。
+namespace util {
+template <class T>
+struct AsStream;
+}  // namespace util
+
+namespace vadrv_compat {
+
+template <class T>
+struct is_as_stream : std::false_type {};
+
+template <class T>
+struct is_as_stream<util::AsStream<T>> : std::true_type {};
+
+}  // namespace vadrv_compat
+
+namespace std {
+namespace chrono {
+
+// libstdc++ 12 没有 C++20 时区类型，这里只需要一个“本地时区”占位。
+struct shim_local_zone {
+};
+
+inline shim_local_zone current_zone() noexcept {
+    return {};
+}
+
+using shim_time_point = std::chrono::time_point<std::chrono::system_clock, std::chrono::milliseconds>;
+
+struct zoned_time : shim_time_point {
+    using shim_time_point::shim_time_point;
+    constexpr zoned_time(shim_local_zone, const shim_time_point& tp) noexcept : shim_time_point(tp) {
+    }
+};
+
+}  // namespace chrono
+
+// C++20 的 std::formatter 主模板对不可格式化的类型是未定义的（不完整），
+// log.h 靠 `requires { std::formatter<T, char>(); }` 来决定走 AsStream 回退。
+// 这里用 fmt::is_formattable 复刻同样的可见性，并把 AsStream 排除在外，
+// 免得和 log.h 里那个特化撞成二义。
+template <class T, class C = char, class = void>
+struct formatter;
+
+template <class T, class C>
+struct formatter<T, C, std::enable_if_t<fmt::is_formattable<T, C>::value &&
+                                        !vadrv_compat::is_as_stream<T>::value>> : fmt::formatter<T, C> {
+};
+
+// fmt 9.1 的 basic_format_string 构造函数是 consteval，运行期拼出来的字符串
+// 构造不了它。util::format_to 会拿运行期字符串来调，所以这里换成普通包装。
+//
+// 关键在于 log.h 的 util::format_to：
+//   mapped_string<Args...> = basic_format_string<char, wrap(declval<Args>())...>
+//   return std::format(fmt, wrap(args)...);
+// 它推导出的参数包是**未包装**类型，转发出去的实参却已经是**包装后**类型
+// （枚举之类会包成 AsStream<T>），两者是不同的 basic_format_string 实例。
+// 所以 std::format 的格式串形参不能用 basic_format_string<Args...>——
+// 那会让 Args 从格式串上被推导，和实参对不上。改用下面这个非模板的
+// 基本类型：basic_format_string 的任意实例都能通过派生转成它，
+// 字符串字面量也能直接构造它。
+struct basic_format_string_base {
+    fmt::string_view str;
+
+    // 约束排掉 basic_format_string_base 及其派生类：否则拷贝构造、或
+    // basic_format_string 转基类时，都会走进这个模板，然后拿
+    // basic_format_string 去构造 fmt::string_view，直接编译失败。
+    // 这两种情况分别由下面的非模板拷贝构造和派生类的隐式转基类接。
+    template <class S, class = std::enable_if_t<!std::is_base_of_v<basic_format_string_base, std::decay_t<S>> &&
+                                                 !std::is_same_v<std::decay_t<S>, basic_format_string_base>>>
+    basic_format_string_base(const S& s) : str(s) {
+    }
+
+    basic_format_string_base() = default;
+    basic_format_string_base(const basic_format_string_base&) = default;
+    basic_format_string_base(basic_format_string_base&&) = default;
+    basic_format_string_base& operator=(const basic_format_string_base&) = default;
+    basic_format_string_base& operator=(basic_format_string_base&&) = default;
+};
+
+template <class... Args>
+struct basic_format_string : basic_format_string_base {
+    using basic_format_string_base::basic_format_string_base;
+};
+
+// 不能给 basic_format_string 加隐式转 fmt::string_view：util::format_to 的
+// 返回类型是 auto，会把这个转换也当成候选，返回类型和 std::string 打架。
+// 所以只留一个显式取用的函数。
+inline fmt::string_view get(const basic_format_string_base& f) noexcept {
+    return f.str;
+}
+
+// std::format 自己转发，不 using fmt::format：
+// fmt 那条 format_string<T...> 重载的形参是 consteval 构造的，运行期字符串传不进来。
+// 格式串形参是非推导的（非模板类型），Args 只从后面的实参推导。
+template <class... Args>
+std::string format(basic_format_string_base f, Args&&... args) {
+    return fmt::vformat(get(f), fmt::make_format_args(args...));
+}
+
+using fmt::vformat;
+using fmt::make_format_args;
+
+}  // namespace std
+
+namespace fmt {
+// std::vformat 收的是 std::make_format_args 的结果，fmt 在这里做静态断言，
+// 所以 AsStream<T> 也必须对 fmt 可格式化。逻辑和 log.h 里的 std::formatter 特化一致。
+template <class T, class C>
+struct formatter<util::AsStream<T>, C> {
+    constexpr auto parse(auto& ctx) {
+        return ctx.begin();
+    }
+
+    auto format(const util::AsStream<T>& s, auto& ctx) const {
+        std::ostringstream os;
+        os << s.v;
+        auto str = os.str();
+        return std::ranges::copy(str, ctx.out()).out;
+    }
+};
+
+// 继承 time_point 的 formatter，parse/format 都能直接用；
+// 靠派生到基类的转换把 zoned_time 交给 time_point 的 format()。
+template <>
+struct formatter<std::chrono::zoned_time, char> : formatter<std::chrono::shim_time_point, char> {
+};
+}  // namespace fmt
