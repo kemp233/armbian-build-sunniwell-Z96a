@@ -662,11 +662,19 @@ function _rockchip_multimedia_drop_lightdm() {
 		lightdm lightdm-gtk-greeter liblightdm-gobject-1-0 || \
 		exit_with_error "rockchip-multimedia: failed to remove lightdm; the desktop would fall back to X11 + swrast"
 
-	# 把别名显式指回 gdm3。首次启动脚本本来也会建这个软链, 但它建之前
-	# 已经有显示管理器在跑了 —— 镜像里就没有别的东西可抢, 这样才稳。
+	# 把别名显式指回 gdm3。注意两件事:
+	# 1) lightdm.postrm 的 purge **不会**摘掉它 postinst 建的
+	#    /etc/systemd/system/display-manager.service 软链, 镜像里会留一个
+	#    悬空指向 lightdm.service 的别名;
+	# 2) gdm3.service 没有 [Install] 段 (Debian 的 DM 靠这个别名启动),
+	#    systemctl enable gdm3 是空操作, 建不了别名 (6.1.172 真机镜像实测,
+	#    systemd 明确提示 "no installation config")。
+	# 所以必须亲手 ln, 别指望 enable 顺手做。
 	if chroot_sdcard dpkg-query --show --showformat='${db:Status-Status}' gdm3 2>/dev/null | grep -q "^installed$"; then
+		chroot_sdcard ln -sfn /lib/systemd/system/gdm3.service /etc/systemd/system/display-manager.service || \
+			exit_with_error "rockchip-multimedia: failed to point display-manager.service at gdm3"
 		chroot_sdcard systemctl --no-reload enable gdm3 || \
-			display_alert "rockchip-multimedia" "could not 'systemctl enable gdm3' in the image" "warn"
+			display_alert "rockchip-multimedia" "'systemctl enable gdm3' is a no-op without [Install]; the symlink above is what matters" "warn"
 	else
 		display_alert "rockchip-multimedia" "gdm3 is not installed (CLI image?); leaving display-manager alone" "warn"
 	fi
