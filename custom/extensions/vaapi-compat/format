@@ -1,9 +1,32 @@
-// GCC 12 的 libstdc++ 没有 C++20 <format>，也没有 <chrono> 的时区支持。
 // rockchip_vaapi_driver 只用到 std::format / std::vformat /
 // std::basic_format_string / std::formatter / std::make_format_args
-// 和 std::chrono::zoned_time 这一小撮，这里用 libfmt 顶上。
+// 和 std::chrono::zoned_time 这一小撮。libstdc++ 12 及更早没有 C++20
+// <format>，<chrono> 也没有时区类型，这里用 libfmt 顶上。
 // 放在 -I 目录里，靠搜索顺序抢在系统头文件前面。
 #pragma once
+
+// ---- 只在 libstdc++ 真的没有 <format> 时才顶上 ----
+//
+// 判据用 __cpp_lib_format（由 <version> 给）。libstdc++ 从 GCC 13 起自带完整
+// 的 <format>，而 std::chrono::zoned_time / current_zone 恰恰也是那一年才加的，
+// 且在 c++config 里没有任何守卫宏 —— __cpp_lib_chrono 在 11 和 13 上都是
+// 201611，区分不了。所以 __cpp_lib_format 为 0 正好等价于"时区类型也没有"，
+// 下面这块垫片才既必要又不冲突。
+//
+// 而且有原生实现时不能硬顶：libstdc++ 13 自己的 <chrono> → bits/chrono_io.h
+// 会 #include <format>，我们这个垫头会把那份真的换掉，结果 chrono_io 里的
+// __format::__write 没声明，libstdc++ 自己先编不过（Ubuntu 24.04 的 g++-13
+// 实测：ambiguating new declaration of current_zone / zoned_time redeclared）。
+// 所以原生有就 include_next 让回系统那份，本文件一行内容都不出。
+#if defined(__GLIBCXX__) && __has_include_next(<version>)
+#include <version>
+#endif
+
+#if defined(__cpp_lib_format) && __has_include_next(<format>)
+
+#include_next <format>
+
+#else
 
 #include <algorithm>
 #include <chrono>
@@ -145,3 +168,5 @@ template <>
 struct formatter<std::chrono::zoned_time, char> : formatter<std::chrono::shim_time_point, char> {
 };
 }  // namespace fmt
+
+#endif  // __cpp_lib_format 未定义 → 用 libfmt 顶上

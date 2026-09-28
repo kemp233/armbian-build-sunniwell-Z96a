@@ -430,9 +430,29 @@ function _rockchip_multimedia_build_vaapi() {
 	# 的是 /tmp 下的 staging 目录, 泄到后面构建步骤里会让它们优先加载这里的
 	# librockchip_mpp, 而不是镜像里那一份。
 	local mpp_lib_dir="${mpp_stage}/${lib_dir}"
-	local mpp_inc_dir="${mpp_stage}${prefix}/include/rockchip"
-	[[ -f "${mpp_inc_dir}/rk_mpi.h" ]] || \
-		exit_with_error "rockchip-multimedia: ${mpp_inc_dir}/rk_mpi.h missing (MPP build stage incomplete)"
+	# 这里要的是 include 的**父目录**, 不是 rockchip 子目录本身。驱动的源码写的是
+	# #include <rockchip/mpp_buffer.h> (src/mpp_common.hpp), 也就是把
+	# .../usr/include 放进搜索路径, 靠 rockchip/ 这一层去拼。
+	#
+	# 上游 CMakeLists.txt:
+	#     find_path(ROCKCHIP_MPP_INCLUDE NAMES rk_mpi.h PATH_SUFFIXES rockchip)
+	#     target_include_directories(rockchip_drv_video PRIVATE ${MPP_INCLUDE_DIR} ...)
+	# find_path 加了 PATH_SUFFIXES=rockchip, 返回的是**含 rk_mpi.h 的那个目录**,
+	# 也就是 .../usr/include/rockchip —— 比实际需要的少一层。传 -D 覆盖时这个
+	# 错位就原样传下去了, 编译直接死在:
+	#     fatal error: rockchip/mpp_buffer.h: No such file or directory
+	#
+	# 上游自己编得出来是因为它把 MPP 装在 /usr/local/include/rockchip, 而
+	# /usr/local/include 本来就在 GCC 默认搜索路径里, 那条 target_include_directories
+	# 加不加都一样。板子上装在 /usr/include/rockchip 同理。只有 CI 里 MPP 放在
+	# /tmp 的 staging 目录才会暴露出来 (CI 实测: 2026-09-28 run 36380985412)。
+	local mpp_inc_parent="${mpp_stage}${prefix}/include"
+	local mpp_inc_dir="${mpp_inc_parent}/rockchip"
+	# 门禁查驱动源码真正 include 的那个头 (mpp_common.hpp 里第一个), 而不是
+	# rk_mpi.h —— 上一版查的 rk_mpi.h 就在 rockchip 子目录里, 查得过, 但根本
+	# 不是编译器要找的那个, 所以放行了一个必然编不过的构建。
+	[[ -f "${mpp_inc_dir}/mpp_buffer.h" ]] || \
+		exit_with_error "rockchip-multimedia: ${mpp_inc_dir}/mpp_buffer.h missing (MPP build stage incomplete)"
 	[[ -f "${mpp_lib_dir}/librockchip_mpp.so" ]] || \
 		exit_with_error "rockchip-multimedia: ${mpp_lib_dir}/librockchip_mpp.so missing (MPP build stage incomplete)"
 
@@ -464,7 +484,7 @@ function _rockchip_multimedia_build_vaapi() {
 		-DCMAKE_C_FLAGS="-I${compat_inc}" \
 		-DCMAKE_CXX_FLAGS="-I${compat_inc}" \
 		-DROCKCHIP_MPP_LIB="${mpp_lib_dir}/librockchip_mpp.so" \
-		-DROCKCHIP_MPP_INCLUDE="${mpp_inc_dir}" \
+		-DROCKCHIP_MPP_INCLUDE="${mpp_inc_parent}" \
 		|| exit_with_error "rockchip-multimedia: cmake configure failed for ${src_dir}"
 
 	# 只编驱动本体。tools/ 下那几个探针要 EGL/GLES/gbm 头, 那是板上排查 Firefox
