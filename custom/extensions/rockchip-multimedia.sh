@@ -503,16 +503,41 @@ function _rockchip_multimedia_build_vaapi() {
 
 	# 门禁二: 别把带 not found 的库塞进镜像。构建容器本身就是 arm64, 未必装了
 	# aarch64-linux-gnu-* 那套交叉 binutils, 两个名字都试一遍。
+	#
+	# 判据用 ldconfig 的缓存, 而不是硬编码某几个目录: 库可能落在
+	# /usr/lib/aarch64-linux-gnu、/usr/local/lib、/usr/lib 任意一个, 只认死路径
+	# 会把好库误报成 not found, 白白让构建失败。ldconfig -p 列出的是动态链接器
+	# 真正会搜的那些目录。
 	local objdump_bin="" _t=""
 	for _t in objdump aarch64-linux-gnu-objdump; do
 		command -v "${_t}" >/dev/null 2>&1 && { objdump_bin="${_t}"; break; }
 	done
+	[[ -n "${objdump_bin}" ]] || \
+		exit_with_error "rockchip-multimedia: no objdump available to check DT_NEEDED of ${va_out}"
+	local ldconfig_cache=""
+	command -v ldconfig >/dev/null 2>&1 && ldconfig_cache="$(ldconfig -p 2>/dev/null || true)"
+	# 先把 NEEDED 列表取出来单独判一次非空。objdump 读不动这个文件时 (架构不对、
+	# 文件截断、被 strip 坏) 同样是一行都不输出, 而 missing 为空会被当成
+	# "全部可解析" 而放行 —— 那等于给一个坏驱动开绿灯。任何驱动至少得链 libc。
+	local needed_libs=""
+	needed_libs="$("${objdump_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}')"
+	[[ -n "${needed_libs}" ]] || \
+		exit_with_error "rockchip-multimedia: objdump read no DT_NEEDED from ${va_out} (not an ELF shared object?)"
 	local missing_libs=""
-	if [[ -n "${objdump_bin}" ]]; then
-		missing_libs="$("${objdump_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}' | while read -r _l; do
-			[[ -f "${mpp_lib_dir}/${_l}" || -e "/usr/lib/aarch64-linux-gnu/${_l}" ]] || echo "${_l}"
-		done)"
-	fi
+	missing_libs="$(while read -r _l; do
+		[[ -n "${_l}" ]] || continue
+		# MPP 是这轮刚编出来、还没进 ldconfig 缓存的, 所以先看 staging 目录。
+		if [[ -f "${mpp_lib_dir}/${_l}" ]]; then
+			continue
+		fi
+		# ldconfig -p 每行形如 "\tlibfoo.so.1 (libc6,x86-64) => /lib/libfoo.so.1",
+		# 认最后那个路径就行。
+		if [[ -n "${ldconfig_cache}" ]] && grep -qE "(^|[[:space:]])${_l//./\\.}([[:space:]]|$)" <<< "${ldconfig_cache}"; then
+			continue
+		fi
+		# 缓存读不到时的兜底 (比如 ldconfig 没装或没权限)。
+		[[ -e "/usr/lib/aarch64-linux-gnu/${_l}" || -e "/usr/lib/${_l}" || -e "/lib/${_l}" ]] || echo "${_l}"
+	done <<< "${needed_libs}")"
 	[[ -z "${missing_libs}" ]] || \
 		exit_with_error "rockchip-multimedia: unresolved DT_NEEDED: ${missing_libs}"
 
