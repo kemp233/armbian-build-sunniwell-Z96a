@@ -125,6 +125,58 @@ function _rmm_source_framework() {
 	_RMM_FRAMEWORK_SOURCED=1
 }
 
+# 目标 rootfs 不保证有的库 —— "得自己带进镜像"的唯一判据, 构建阶段用它决定
+# 打包哪些, pre_umount 阶段用同一个函数核镜像里有没有。放一个函数里是为了两边
+# 不会各写一份然后悄悄漂移。
+#
+# 现在只有 libfmt: 构建容器 (jammy) 的 libfmt-dev:arm64 8.1.1 给 SONAME
+# libfmt.so.8, 目标 bookworm 只有 libfmt9 (libfmt.so.9), 名字对不上, 驱动就
+# dlopen 不了。libdrm / libva / libc 这些发行版自带, 不归这里管。
+function _rockchip_multimedia_needs_bundling() {
+	case "${1:-}" in
+		libfmt.so.*) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# 把上面判为"得自己带"的那几个库, 从构建机拷进 staging。
+#
+# 驱动链的是**构建容器**那版 libfmt 的 SONAME。容器是 jammy, libfmt-dev:arm64
+# 8.1.1 给的是 libfmt.so.8; 而目标镜像是 bookworm, 只有 libfmt9 (libfmt.so.9)。
+# 名字对不上, 于是刷完的板子上驱动明明在、构建期门禁全过, 却加载不了:
+#     libva error: dlopen of /usr/lib/aarch64-linux-gnu/dri/rockchip_drv_video.so
+#                  failed: libfmt.so.8: cannot open shared object file
+# vainfo 直接 exit, Firefox 自然也没有硬解。2026-09-28 刷的那版就是这样。
+#
+# 按 MPP 的同一套路, 把编驱动时用的那份原样打进镜像: 头文件和二进制来自同一个
+# libfmt-dev, 不存在跨版本 ABI 风险。libdrm / libva / libc 这些 bookworm 自己
+# 就有, 不动 —— 塞进去反而可能盖掉发行版更新的版本。
+#
+# 入参是驱动的 DT_NEEDED 列表。stage_dir / lib_dir 用调用方的。
+function _rockchip_multimedia_bundle_libs() {
+	local _bl="" _src="" _t="" _bundled=()
+	local _cache=""
+	mkdir -p "${stage_dir}/${lib_dir}"
+	command -v ldconfig >/dev/null 2>&1 && _cache="$(ldconfig -p 2>/dev/null || true)"
+	for _bl in "$@"; do
+		_rockchip_multimedia_needs_bundling "${_bl}" || continue
+		_src="$(awk -v n="${_bl}" '$1==n {print $NF; exit}' <<< "${_cache}")"
+		if [[ ! -f "${_src}" ]]; then
+			for _t in /usr/lib/aarch64-linux-gnu /usr/lib /lib/aarch64-linux-gnu /lib /usr/local/lib; do
+				[[ -f "${_t}/${_bl}" ]] && { _src="${_t}/${_bl}"; break; }
+			done
+		fi
+		[[ -f "${_src}" ]] || \
+			exit_with_error "rockchip-multimedia: driver needs ${_bl} but it is not on the build host; install the matching libfmt runtime (libfmt-dev pulls it in) or drop the dependency"
+		# install 跟随符号链接, 落下来是一个内容正确的普通文件, SONAME 仍是 ${_bl}
+		install -m 755 "${_src}" "${stage_dir}/${lib_dir}/${_bl}"
+		_bundled+=("${_bl} (from ${_src})")
+	done
+	[[ ${#_bundled[@]} -gt 0 ]] && \
+		display_alert "rockchip-multimedia" "bundled with VA-API driver: ${_bundled[*]}" "info"
+	return 0
+}
+
 # ============================================================ Packages --
 function post_family_config__rockchip_multimedia_gles_packages() {
 	_rmm_source_framework || return 1
@@ -501,13 +553,6 @@ function _rockchip_multimedia_build_vaapi() {
 	nm -D --defined-only "${va_out}" | grep -q " __vaDriverInit_1_0$" || \
 		exit_with_error "rockchip-multimedia: ${va_out} does not export __vaDriverInit_1_0"
 
-	# 门禁二: 别把带 not found 的库塞进镜像。构建容器本身就是 arm64, 未必装了
-	# aarch64-linux-gnu-* 那套交叉 binutils, 两个名字都试一遍。
-	#
-	# 判据用 ldconfig 的缓存, 而不是硬编码某几个目录: 库可能落在
-	# /usr/lib/aarch64-linux-gnu、/usr/local/lib、/usr/lib 任意一个, 只认死路径
-	# 会把好库误报成 not found, 白白让构建失败。ldconfig -p 列出的是动态链接器
-	# 真正会搜的那些目录。
 	local objdump_bin="" _t=""
 	for _t in objdump aarch64-linux-gnu-objdump; do
 		command -v "${_t}" >/dev/null 2>&1 && { objdump_bin="${_t}"; break; }
@@ -523,11 +568,26 @@ function _rockchip_multimedia_build_vaapi() {
 	needed_libs="$("${objdump_bin}" -p "${va_out}" 2>/dev/null | awk '/NEEDED/ {print $2}')"
 	[[ -n "${needed_libs}" ]] || \
 		exit_with_error "rockchip-multimedia: objdump read no DT_NEEDED from ${va_out} (not an ELF shared object?)"
+
+	mkdir -p "${stage_dir}/${lib_dir}/dri"
+
+	# 把驱动链的、目标 rootfs 不保证有的库拷进 staging, 然后门禁二再对着
+	# "最终镜像里会有的东西" 重新核一遍 DT_NEEDED。
+	_rockchip_multimedia_bundle_libs ${needed_libs}
+
+	# 门禁二: 别把带 not found 的库塞进镜像。构建容器本身就是 arm64, 未必装了
+	# aarch64-linux-gnu-* 那套交叉 binutils, 两个名字都试一遍。
+	#
+	# 判据用 ldconfig 的缓存, 而不是硬编码某几个目录: 库可能落在
+	# /usr/lib/aarch64-linux-gnu、/usr/local/lib、/usr/lib 任意一个, 只认死路径
+	# 会把好库误报成 not found, 白白让构建失败。ldconfig -p 列出的是动态链接器
+	# 真正会搜的那些目录。staging 目录排在最前面, 因为那才是最终镜像里会有的。
 	local missing_libs=""
 	missing_libs="$(while read -r _l; do
 		[[ -n "${_l}" ]] || continue
-		# MPP 是这轮刚编出来、还没进 ldconfig 缓存的, 所以先看 staging 目录。
-		if [[ -f "${mpp_lib_dir}/${_l}" ]]; then
+		# MPP 是这轮刚编出来、还没进 ldconfig 缓存的; libfmt 是刚打进 staging 的。
+		# 两者都在镜像里, 所以先查这两个目录。
+		if [[ -f "${mpp_lib_dir}/${_l}" || -f "${stage_dir}/${lib_dir}/${_l}" ]]; then
 			continue
 		fi
 		# ldconfig -p 每行形如 "\tlibfoo.so.1 (libc6,x86-64) => /lib/libfoo.so.1",
@@ -544,10 +604,60 @@ function _rockchip_multimedia_build_vaapi() {
 	# lib_dir 已经是 "usr/lib/aarch64-linux-gnu" 这个相对路径, 这里再叠
 	# ${prefix} 会得到 usr/usr/lib/... , rsync 进 rootfs 之后驱动就落在
 	# /usr/usr/lib/... 下面, libva 照样找不到。跟上面 RKNN 那段一个写法。
-	mkdir -p "${stage_dir}/${lib_dir}/dri"
 	install -m 755 "${va_out}" "${stage_dir}/${lib_dir}/dri/rockchip_drv_video.so"
 	rsync -av "${stage_dir}/" "${SDCARD}/"
 	display_alert "rockchip-multimedia" "VA-API driver installed: usr/${lib_dir}/dri/rockchip_drv_video.so ($(stat -c '%s' "${va_out}") bytes)" "info"
+}
+
+# 桌面的显示管理器必须只剩 gdm3 一个。
+#
+# 板子实况 (26.5.1 bookworm, 2026-09-28 刷的):
+#   - lightdm 在镜像里, 而且 apt-cache rdepends --installed lightdm 是空的 ——
+#     纯孤儿包, 谁都没依赖它。
+#   - armbian 自己在 lib/functions/rootfs/rootfs-desktop.sh 的 desktop_postinstall()
+#     里提前 disable lightdm/gdm3/sddm, 但那一刻包还没装, disable 落空:
+#         Failed to disable unit, unit lightdm.service does not exist.
+#   - 于是 lightdm 带着 Debian 的默认 enabled 状态进镜像, 首次启动时抢在 gdm3
+#     前面起来。gdm3 一次都没跑过 (journalctl -u gdm3 -b 无条目),
+#     /etc/systemd/system/display-manager.service -> gdm3.service 这个软链是
+#     06:59 首次启动脚本建的, 建的时候 lightdm 已经在跑了。
+#   - lightdm 的自动登录配置还写着 user-session=xfce, 而 xfce 根本没装,
+#     于是回落到默认 GNOME 会话, 跑在 X11 上。
+#
+# 后果是 GPU 白装: Mali 这个 blob 只提供 EGL/GLESv2, 没有 libGLX, 也不报
+# EGL_EXT_platform_x11。X11 下 mutter 只能走 GLX, 于是
+#   libGL error: glx: failed to create dri3 screen
+#   libGL error: failed to load driver: rockchip        (dri/rockchip_dri.so 是
+#                                                        mainline Mesa 的, 只支持
+#                                                        RK3400 Pallas, 不是 G52)
+#   gnome-session-check-accelerated: GL Helper exited with code 512
+#   gnome-session-c: eglGetDisplay() failed
+#   gnome-session-check-accelerated: GLES Helper exited with code 256
+# GNOME 的加速检测两条腿全断, 回落到非加速会话, 3D 桌面走 Mesa swrast 软件
+# 光栅化 (进程 maps 里能同时看到 libmali.so.1.9.0 和 swrast_dri.so)。
+# Wayland 才是 Mali 走得通的那条路 —— EGL_KHR_platform_wayland 和
+# EGL_WL_bind_wayland_display 都在, 板子上 eglinfo -B 已经实测能出
+# "EGL vendor string: ARM / Bifrost-g24p0-00eac0"。
+function _rockchip_multimedia_drop_lightdm() {
+	if ! chroot_sdcard dpkg-query --show --showformat='${db:Status-Status}' lightdm 2>/dev/null | grep -q "^installed$"; then
+		return 0
+	fi
+
+	display_alert "rockchip-multimedia" "removing lightdm so gdm3 can own display-manager" "info"
+	# --purge: 只 remove 会把 /etc/lightdm 留着, 首次启动脚本读到它仍可能
+	# 选错会话类型。liblightdm-gobject-1-0 一起带走, 免得留个孤儿。
+	do_with_retries 3 chroot_sdcard apt-get remove --purge --yes \
+		lightdm lightdm-gtk-greeter liblightdm-gobject-1-0 || \
+		exit_with_error "rockchip-multimedia: failed to remove lightdm; the desktop would fall back to X11 + swrast"
+
+	# 把别名显式指回 gdm3。首次启动脚本本来也会建这个软链, 但它建之前
+	# 已经有显示管理器在跑了 —— 镜像里就没有别的东西可抢, 这样才稳。
+	if chroot_sdcard dpkg-query --show --showformat='${db:Status-Status}' gdm3 2>/dev/null | grep -q "^installed$"; then
+		chroot_sdcard systemctl --no-reload enable gdm3 || \
+			display_alert "rockchip-multimedia" "could not 'systemctl enable gdm3' in the image" "warn"
+	else
+		display_alert "rockchip-multimedia" "gdm3 is not installed (CLI image?); leaving display-manager alone" "warn"
+	fi
 }
 
 # ============================================================ Hooks --
@@ -591,6 +701,7 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rockchip_multimedia_build_vaapi
 	_rockchip_multimedia_setup_vdec_mpp_owner
 	_rockchip_multimedia_setup_gpu_access
+	_rockchip_multimedia_drop_lightdm
 
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
@@ -771,29 +882,35 @@ RULEOF
 
 # NOTE: the first customize_image definition wins, so symlink setup runs from
 # the final pre-umount hook below after the Mali package has been installed.
+#
+# $1 = the tree to modify. In pre_umount_final_image that MUST be ${MOUNT}: at
+# that point the image has already been rsync'd *out of* ${SDCARD} into
+# ${MOUNT}, and anything written to ${SDCARD} afterwards is thrown away when
+# armbian deletes the staging rootfs. Writing there is silently a no-op.
 function _rockchip_multimedia_setup_mali_symlinks() {
+	local img_root="${1:?_rockchip_multimedia_setup_mali_symlinks needs the image root}"
 	display_alert "rockchip-multimedia" "configuring Mali G52 EGL/GLES/GBM providers" "info"
 
 	local mali_lib_dir="${lib_dir}/mali-egl"
 	for _wrapper in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
-		if [[ ! -e "${SDCARD}/${mali_lib_dir}/${_wrapper}" ]]; then
-			exit_with_error "rockchip-multimedia: Mali wrapper missing: /${mali_lib_dir}/${_wrapper}"
+		if [[ ! -e "${img_root}/${mali_lib_dir}/${_wrapper}" ]]; then
+			exit_with_error "rockchip-multimedia: Mali wrapper missing: /${mali_lib_dir}/${_wrapper} (under ${img_root})"
 		fi
-		ln -sf "mali-egl/${_wrapper}" "${SDCARD}/${lib_dir}/${_wrapper}"
+		ln -sf "mali-egl/${_wrapper}" "${img_root}/${lib_dir}/${_wrapper}"
 	done
 
 	# OpenCL support is chip/blob dependent and is not required for the desktop.
-	if [[ -e "${SDCARD}/${mali_lib_dir}/libOpenCL.so.1" ]]; then
-		ln -sf "mali-egl/libOpenCL.so.1" "${SDCARD}/${lib_dir}/libOpenCL.so.1"
+	if [[ -e "${img_root}/${mali_lib_dir}/libOpenCL.so.1" ]]; then
+		ln -sf "mali-egl/libOpenCL.so.1" "${img_root}/${lib_dir}/libOpenCL.so.1"
 	fi
 
-	mkdir -p "${SDCARD}/etc/profile.d"
+	mkdir -p "${img_root}/etc/profile.d"
 	# libva 的驱动名是 .so 文件名里 _drv_video.so 之前的部分。装的是
 	# rockchip_drv_video.so (sfqr0414/rockchip_vaapi_driver), 所以名字是 rockchip;
 	# 之前写的 rkmpp 是 woodyst/rockchip-vaapi 那个的产物名, 换驱动后没跟着改,
 	# 结果 libva 去找 rkmpp_drv_video.so 找不到 —— 板子上 Firefox 加载不了
 	# VA 驱动就是这么来的。
-	cat > "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" << 'EOF'
+	cat > "${img_root}/etc/profile.d/rockchip-vaapi.sh" << 'EOF'
 export LIBVA_DRIVER_NAME=rockchip
 export LIBVA_DRIVERS_PATH=/usr/lib/aarch64-linux-gnu/dri
 
@@ -815,13 +932,21 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 	_rmm_source_framework || return 1
 	_rmm_init
 
+	# pre_umount_final_image 的语义是"在 unmount 之前 hack 镜像" —— 镜像是
+	# ${MOUNT}, 紧接着就被 umount_chroot_recursive 掉。${SDCARD} 这时候是早就被
+	# rsync 读走的源 rootfs, 往里写等于写进垃圾桶。2026-09-28 那次成功的构建
+	# (run 36384746086) 日志里三条 alert 都在, 但刷出来的板子上
+	# /etc/profile.d/rockchip-vaapi.sh 根本没有, 就是这个原因。
+	#
+	# 只有脱离 armbian 单独跑 `rockchip-multimedia.sh verify` 时才退回 SDCARD。
+	local img="${MOUNT:-}"
+	[[ -n "${img}" ]] || img="${SDCARD:?neither MOUNT nor SDCARD is set}"
+
 	# Set up the Mali symlinks here (the customize_image hook is dropped by
 	# the framework due to an "Extension conflict") and *then* verify.
-	_rockchip_multimedia_setup_mali_symlinks
+	_rockchip_multimedia_setup_mali_symlinks "${img}"
 
-	display_alert "rockchip-multimedia" "verifying installation on rootfs" "info"
-
-	# SDCARD is a readonly global - use it directly
+	display_alert "rockchip-multimedia" "verifying installation on ${img}" "info"
 
 	# Check core libraries. Names match what the build steps actually install:
 	# MPP installs librockchip_mpp.so (not libmpp.so), librga ships prebuilt
@@ -834,28 +959,51 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 		"${lib_dir}/librga.so" \
 		"${lib_dir}/librknnrt.so" \
 		"${lib_dir}/dri/rockchip_drv_video.so"; do
-		if [[ ! -e "${SDCARD}/${f}" ]]; then
-			exit_with_error "rockchip-multimedia: expected file missing from rootfs: /${f}"
+		if [[ ! -e "${img}/${f}" ]]; then
+			exit_with_error "rockchip-multimedia: expected file missing from image: /${f}"
 		fi
 	done
 
 	# 可执行位和 profile.d 脚本同样要真的在, 不能靠 "optional"。
-	if [[ ! -x "${SDCARD}/${lib_dir}/dri/rockchip_drv_video.so" ]]; then
+	if [[ ! -x "${img}/${lib_dir}/dri/rockchip_drv_video.so" ]]; then
 		exit_with_error "rockchip-multimedia: /${lib_dir}/dri/rockchip_drv_video.so is not executable"
 	fi
 	# profile.d 里写的驱动名必须和实际装进来的 .so 对得上, 否则 libva 按名字
 	# 去找 ${LIBVA_DRIVER_NAME}_drv_video.so 会找不到。
-	if ! grep -q "^export LIBVA_DRIVER_NAME=rockchip$" "${SDCARD}/etc/profile.d/rockchip-vaapi.sh" 2>/dev/null; then
+	if ! grep -q "^export LIBVA_DRIVER_NAME=rockchip$" "${img}/etc/profile.d/rockchip-vaapi.sh" 2>/dev/null; then
 		exit_with_error "rockchip-multimedia: /etc/profile.d/rockchip-vaapi.sh does not set LIBVA_DRIVER_NAME=rockchip"
+	fi
+
+	# 驱动链的、但目标 rootfs 不保证有的库 (现在是 libfmt), 必须在镜像里有着落。
+	# 判据跟构建阶段是同一个函数, 两边不会漂移: 构建时把这类库打进 ${lib_dir},
+	# 这里拿驱动的 DT_NEEDED 反过来对着最终镜像核 —— 刷完才发现
+	# "libfmt.so.8: cannot open shared object file" 的那次就是这么漏过去的。
+	#
+	# 刻意不逐个查 DT_NEEDED 里的所有库: libdrm.so.2 / libva.so.2 这些是发行版
+	# 自己的包, 该由 dpkg 负责, 真实路径还是 /lib/aarch64-linux-gnu (usermerge
+	# 之后 /lib -> usr/lib), 认死路径只会误报。
+	local _dobj="" _dt="" _bmissing=""
+	for _dt in objdump aarch64-linux-gnu-objdump; do
+		command -v "${_dt}" >/dev/null 2>&1 && { _dobj="${_dt}"; break; }
+	done
+	if [[ -n "${_dobj}" ]]; then
+		while read -r _bl; do
+			[[ -n "${_bl}" ]] || continue
+			_rockchip_multimedia_needs_bundling "${_bl}" || continue
+			[[ -e "${img}/${lib_dir}/${_bl}" || -e "${img}/lib/aarch64-linux-gnu/${_bl}" ]] || \
+				_bmissing="${_bmissing} ${_bl}"
+		done <<< "$("${_dobj}" -p "${img}/${lib_dir}/dri/rockchip_drv_video.so" 2>/dev/null | awk '/NEEDED/ {print $2}')"
+		[[ -z "${_bmissing}" ]] || \
+			exit_with_error "rockchip-multimedia: the VA driver needs${_bmissing}, which the target rootfs does not ship and which was not bundled; libva would fail to dlopen it"
 	fi
 
 	# Runtime provider links must resolve inside the Mali package directory.
 	for _gl in libEGL.so.1 libGLESv2.so.2 libgbm.so.1; do
-		if [[ ! -L "${SDCARD}/${lib_dir}/${_gl}" ]]; then
+		if [[ ! -L "${img}/${lib_dir}/${_gl}" ]]; then
 			exit_with_error "rockchip-multimedia: /${lib_dir}/${_gl} is not a Mali provider symlink"
 		fi
 		local _target
-		_target="$(readlink -f "${SDCARD}/${lib_dir}/${_gl}")"
+		_target="$(readlink -f "${img}/${lib_dir}/${_gl}")"
 		if [[ "${_target}" != *"${lib_dir}/mali-egl/"* ]]; then
 			exit_with_error "rockchip-multimedia: ${_gl} -> ${_target} (expected Mali provider)"
 		fi
@@ -863,7 +1011,7 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 
 	# Reject Meson's small dummy library. The real G52 g24p0 blob is tens of MB.
 	local _mali_core
-	_mali_core="$(find "${SDCARD}/${lib_dir}/mali-egl" -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
+	_mali_core="$(find "${img}/${lib_dir}/mali-egl" -maxdepth 1 -type f -name 'libmali.so.*' -size +10M -print -quit)"
 	if [[ -z "${_mali_core}" ]]; then
 		exit_with_error "rockchip-multimedia: real Mali G52 blob missing or implausibly small"
 	fi
@@ -871,23 +1019,48 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 
 	# Without this rule the blob cannot build a gbm device as a normal user and
 	# the GDM greeter silently falls back to X11 with llvmpipe.
-	if [[ ! -f "${SDCARD}/etc/udev/rules.d/60-dma-heap-access.rules" ]]; then
+	if [[ ! -f "${img}/etc/udev/rules.d/60-dma-heap-access.rules" ]]; then
 		exit_with_error "rockchip-multimedia: /etc/udev/rules.d/60-dma-heap-access.rules missing; Mali gbm will fail for non-root"
 	fi
 
 	# usermod needs to chroot into the image, which fails silently if the build
 	# ever runs unprivileged, so check the group membership actually landed.
-	if grep -q '^Debian-gdm:' "${SDCARD}/etc/passwd" 2>/dev/null; then
-		if ! awk -F: '$1 == "video" {print $4}' "${SDCARD}/etc/group" |
+	if grep -q '^Debian-gdm:' "${img}/etc/passwd" 2>/dev/null; then
+		if ! awk -F: '$1 == "video" {print $4}' "${img}/etc/group" |
 			tr ',' '\n' | grep -qx 'Debian-gdm'; then
 			exit_with_error "rockchip-multimedia: Debian-gdm is not in the video group; the greeter cannot open /dev/dri/card0"
 		fi
 	fi
 
+	# 桌面用的显示管理器必须只有 gdm3 一个。这块板刷出来的 26.5.1 镜像里 lightdm
+	# 是**孤儿包** (apt-cache rdepends 空), 但它照样被 armbian 装进来了, 而且
+	# 默认 enabled —— armbian 自己在 lib/functions/rootfs/rootfs-desktop.sh 里
+	# 提前 disable lightdm, 那时候包还没装, 于是 disable 落空:
+	#     Failed to disable unit, unit lightdm.service does not exist.
+	# 结果首次启动时 lightdm 抢在 gdm3 前面起来, gdm3 一次都没跑过
+	# (journalctl -u gdm3 -b 是空的), gnome-session 的加速检测两条腿全断:
+	#     libGL error: glx: failed to create dri3 screen
+	#     gnome-session-check-accelerated: GL Helper exited with code 512
+	#     gnome-session-c: eglGetDisplay() failed
+	# 因为 Mali 这个 blob 只有 EGL/GLESv2, 没有 libGLX, 也不报
+	# EGL_EXT_platform_x11 —— X11 下只能落到 Mesa 的 swrast 软件光栅化。
+	# Wayland 才是 Mali 走得通的那条 (EGL_KHR_platform_wayland 在)。
+	if [[ -d "${img}/etc/lightdm" ]] || [[ -e "${img}/lib/systemd/system/lightdm.service" ]]; then
+		exit_with_error "rockchip-multimedia: lightdm is in the image; it will win the display-manager race against gdm3 and the desktop lands on X11 + swrast. Remove it and keep gdm3."
+	fi
+	# display-manager 别名必须指向 gdm3。首次启动脚本会建这个软链, 但建之前
+	# 已经有显示管理器在跑了, 所以这里要求镜像里就别残留别的东西。
+	if [[ -L "${img}/etc/systemd/system/display-manager.service" ]]; then
+		local _dm
+		_dm="$(readlink -f "${img}/etc/systemd/system/display-manager.service")"
+		[[ "${_dm}" == */gdm3.service ]] || \
+			exit_with_error "rockchip-multimedia: display-manager.service -> ${_dm}, expected gdm3.service"
+	fi
+
 	# Only a warning: without gdm3 there is no greeter to configure, and the
 	# stock daemon.conf is a sane fallback for a desktop-less image.
-	if [[ -f "${SDCARD}/etc/gdm3/daemon.conf" ]] &&
-		! grep -q '^WaylandEnable=true' "${SDCARD}/etc/gdm3/daemon.conf"; then
+	if [[ -f "${img}/etc/gdm3/daemon.conf" ]] &&
+		! grep -q '^WaylandEnable=true' "${img}/etc/gdm3/daemon.conf"; then
 		display_alert "rockchip-multimedia" "gdm3 daemon.conf does not enable Wayland; the blob has no GLX, so the greeter will use llvmpipe" "warn"
 	fi
 
