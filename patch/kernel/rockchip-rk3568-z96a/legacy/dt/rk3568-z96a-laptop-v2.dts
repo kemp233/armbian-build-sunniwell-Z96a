@@ -1335,10 +1335,15 @@
 		sc8886@6b {
 			compatible = "ti,bq25700\0southchip,sc8886";
 			reg = <0x6b>;
-			/* disabled（真机验证 v2）: bq25700 驱动 probe 时重写寄存器
-			 * 与 C 口供电取电路径冲突 → 开机卡内核(背光一闪死机)。
-			 * 充电由用户态单写者脚本直接 i2c 访问 0-006b，不受 DT 状态影响 */
-			status = "disabled";
+			/* 必须 okay: 接管这颗芯片的是 0008 补丁带进来的 builtin
+			 * sc8886s_charger (CONFIG_CHARGER_SC8886S=y), 它读 SOC/充电
+			 * 状态全靠这个节点。曾经在 rkr7.2 上 disabled —— 那是 bq25700
+			 * 驱动 builtin 时留下的规避: bq25700 的 probe 会重写寄存器,
+			 * 把 SC8886 的 I2C 状态机搞脱线, 之后任何访问 0x6b 都会挂死
+			 * 同总线的 RK809 → 整机假死(无 panic, pstore 也是空的)。
+			 * config 里已把 CONFIG_CHARGER_BQ25700 关掉, 错误驱动不会再绑,
+			 * 所以这里恢复 okay。 */
+			status = "okay";
 			ti,charge-current = <0xf4240>;
 			ti,max-input-voltage = <0xe4e1c0>;
 			ti,max-input-current = <0x5b8d80>;
@@ -7052,7 +7057,6 @@
 			};
 
 			vcc5v0-otg-pwr-en {
-				status = "disabled";
 				rockchip,pins = <0x03 0x0f 0x00 0x116>;
 				phandle = <0x130>;
 			};
@@ -7358,6 +7362,15 @@
 		regulator-boot-on;
 		regulator-min-microvolt = <0x4c4b40>;
 		regulator-max-microvolt = <0x4c4b40>;
+		/* 这条轨上挂的是 C 口 USB 设备的负载开关。少了下面三行, regulator
+		 * 就只剩 always-on/boot-on 而没有任何使能脚 —— 开关芯片永远不导通,
+		 * 插 USB 设备一点电都没有(rkr5.1 上是好的, 切 rkr7.2 换 DTS 时丢了)。
+		 * gpio = <gpio3 15 0> = GPIO3_D7, 与下面 pinctrl/usb 里的
+		 * vcc5v0-otg-pwr-en (rockchip,pins = <0x03 0x0f ...>) 是同一个脚。 */
+		enable-active-high;
+		gpio = <0x4c 0x0f 0x00>;
+		pinctrl-names = "default";
+		pinctrl-0 = <0x130>;
 		vin-supply = <0x12f>;
 		phandle = <0x112>;
 	};
@@ -7519,6 +7532,7 @@
 		// power-supply = <0x125>;  // disabled: violent mux handles LCD power
         power-supply = <0x125>;
 	/* enable-gpios removed: GPIO0_A3 is the RK809 INT pin */
+		backlight = <0x13d>;/* pwm-backlight, rkr5.1 上有, 换 DTS 时丢了 */
 		bus-format = <0x1009>;/* factory: RGB666_1X18, 6bpc panel */
 		bpc = <0x06>;/* factory: 6bpc */
 		width-mm = <0x135>;
