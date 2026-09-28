@@ -673,6 +673,22 @@ function _rockchip_multimedia_drop_lightdm() {
 }
 
 # ============================================================ Hooks --
+# SC8886 的看门狗如果没人关, 板子会在开机 2-3 分钟后被充电芯片硬复位 ——
+# 无 panic、无 oops、ramoops 也留不下现场 (硬复位直接清 DRAM), 表现就是
+# "装桌面装一半崩了/开机两三分钟死一次"。rkr5.1 时代靠 deploy 脚本手工
+# enable 过; build-with-mali 镜像里 bsp-cli 的 optional 包只 ship 不 enable
+# (copy_all_packages_files_for 只复制文件), 所以每张新镜像都带着这个雷。
+# 这里显式 enable, 让它每次开机跑 init-sc8886.sh 关看门狗 + 配 1A 充电。
+function _rockchip_multimedia_enable_charger_service() {
+	if ! chroot_sdcard test -f /etc/systemd/system/sc8886-charger.service; then
+		display_alert "rockchip-multimedia" "sc8886-charger.service not shipped by bsp-cli; skipping enable" "warn"
+		return 0
+	fi
+	chroot_sdcard systemctl enable sc8886-charger.service ||
+		display_alert "rockchip-multimedia" "could not enable sc8886-charger.service" "warn"
+	display_alert "rockchip-multimedia" "sc8886-charger.service enabled (SC8886 watchdog will be disabled at boot)" "info"
+}
+
 function pre_customize_image__rockchip_multimedia_install() {
 	_rmm_source_framework || return 1
 	_rmm_init
@@ -714,6 +730,7 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rockchip_multimedia_setup_vdec_mpp_owner
 	_rockchip_multimedia_setup_gpu_access
 	_rockchip_multimedia_drop_lightdm
+	_rockchip_multimedia_enable_charger_service
 
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
 }
