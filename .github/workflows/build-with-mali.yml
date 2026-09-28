@@ -6,8 +6,9 @@ on:
       armbian_release:
         description: 'Armbian release'
         type: choice
-        options: [jammy, noble, bookworm]
-        default: jammy
+        options: [bookworm, jammy, noble]
+        # 板子上跑的是 bookworm, jammy 只是留着, 默认别选它
+        default: bookworm
       armbian_branch:
         description: 'Armbian build framework branch'
         type: string

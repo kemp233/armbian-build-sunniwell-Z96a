@@ -35,7 +35,10 @@ inputs:
   armbian_release:
     description: "Choose userspace release"
     required: false
-    default: "jammy"
+    # 这块板实际跑的是 bookworm (板子上就是 Debian 12)。原来默认 jammy, 谁忘了传
+    # 参数就会编出一个 jammy 镜像, 而板子上根本用不了那个 rootfs。
+    # complete-artifact-one-by-one.yml 那边早就是 bookworm, 这里跟上。
+    default: "bookworm"
 
   armbian_version:
     description: "Set different version"
