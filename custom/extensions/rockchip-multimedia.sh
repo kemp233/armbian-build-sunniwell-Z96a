@@ -383,18 +383,43 @@ function _rockchip_multimedia_build_vaapi() {
 
 	# 构建依赖。libva 是构建容器 (Ubuntu jammy arm64) 的 2.14, 原生带
 	# VAProfileH264High10, 驱动也按 2.x 的 va_backend.h 写, 不需要任何占位补丁。
+	#
+	# 这里**没有** libva-drm-dev: Ubuntu/Debian 没有这个包, CMakeLists 里的
+	# pkg_check_modules(LIBVA_DRM REQUIRED libva-drm) 是靠 libva-dev 自带的
+	# /usr/lib/<triplet>/pkgconfig/libva-drm.pc 和 va/va_drm.h 满足的。
+	# 之前误列了它, apt 报 "Unable to locate package libva-drm-dev", 整个
+	# install 一起失败。板子上编译成功那套依赖里也没有它, 可以对上。
+	#
+	# libfmt-dev 是给 <format> 兼容头用的 (gcc-11/12 没有 C++20 <format>),
+	# 它在 Ubuntu 的 universe 里; 构建镜像 universe 是开的 (libva-dev 能装就是证明)。
 	local va_pkgs=()
 	local p
-	for p in cmake pkg-config g++ make libva-dev libva-drm-dev libdrm-dev libfmt-dev; do
+	for p in cmake pkg-config g++ make libva-dev libdrm-dev libfmt-dev; do
 		dpkg -s "${p}" >/dev/null 2>&1 || va_pkgs+=("${p}")
 	done
 	if [[ ${#va_pkgs[@]} -gt 0 ]]; then
+		# apt-get install 里只要有一个包定位不到, 整条命令就不装任何东西。
+		# 先把定位不到的挑出来单独报错, 别再让一个不存在的包把整批拖垮。
+		local unavailable=()
+		for p in "${va_pkgs[@]}"; do
+			apt-cache show "${p}" >/dev/null 2>&1 || unavailable+=("${p}")
+		done
+		if [[ ${#unavailable[@]} -gt 0 ]]; then
+			exit_with_error "rockchip-multimedia: no such package: ${unavailable[*]} (needed: ${va_pkgs[*]})"
+		fi
+
 		display_alert "rockchip-multimedia" "installing VA driver build deps: ${va_pkgs[*]}" "info"
 		apt-get -qq update -y >/dev/null 2>&1 || true
 		# 编不出驱动就别让镜像出去: 之前 woodyst 那版是 warn, 结果镜像里
 		# 一直没有 rockchip_drv_video.so, 板子上才发现。
-		apt-get -qq install -y "${va_pkgs[@]}" || \
-			exit_with_error "rockchip-multimedia: failed to install VA driver build deps: ${va_pkgs[*]}"
+		if ! apt-get -qq install -y "${va_pkgs[@]}"; then
+			# 再点名一次到底哪个没装上, 免得只能对着 apt 的一行输出猜。
+			local still_missing=()
+			for p in "${va_pkgs[@]}"; do
+				dpkg -s "${p}" >/dev/null 2>&1 || still_missing+=("${p}")
+			done
+			exit_with_error "rockchip-multimedia: failed to install VA driver build deps: ${still_missing[*]:-${va_pkgs[*]}}"
+		fi
 	fi
 
 	# MPP 是上一步 DESTDIR staged 的, 没进宿主 /usr。注意 lib_dir 本身就是
