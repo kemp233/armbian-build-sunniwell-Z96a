@@ -184,6 +184,28 @@ static int sc8886s_read_adc_ichg(struct sc8886s_chip *chip)
     return raw * 64; /* mA */
 }
 
+/* ==================== 2S Li-ion voltage -> SOC ==================== */
+static int sc8886s_vbat_to_capacity(int vbat_mv)
+{
+    /* per-cell open-circuit voltage approximation, values in mV */
+    static const int table[][2] = {
+        {6400, 0}, {6600, 2}, {6800, 5}, {7000, 10}, {7150, 17},
+        {7300, 28}, {7450, 42}, {7600, 55}, {7750, 66}, {7900, 75},
+        {8000, 82}, {8100, 88}, {8200, 93}, {8300, 97}, {8400, 100},
+    };
+    int n = sizeof(table) / sizeof(table[0]);
+    int i;
+
+    if (vbat_mv <= table[0][0])
+        return 0;
+    for (i = 1; i < n; i++) {
+        if (vbat_mv <= table[i][0])
+            return table[i-1][1] + (vbat_mv - table[i-1][0]) *
+                   (table[i][1] - table[i-1][1]) / (table[i][0] - table[i-1][0]);
+    }
+    return 100;
+}
+
 /* ==================== Power Supply ==================== */
 static int sc8886s_psy_get_property(struct power_supply *psy,
                                     enum power_supply_property psp,
@@ -209,6 +231,14 @@ static int sc8886s_psy_get_property(struct power_supply *psy,
     case POWER_SUPPLY_PROP_CURRENT_NOW:
         val->intval = chip->ichg_ma * 1000; /* μA */
         break;
+    case POWER_SUPPLY_PROP_CAPACITY: {
+        /* real SOC from SC8886 internal ADC (bypasses broken SARADC) */
+        int mv = sc8886s_read_adc_vbat(chip);
+        if (mv < 0)
+            return mv;
+        val->intval = sc8886s_vbat_to_capacity(mv);
+        break;
+    }
     case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
         val->intval = 8400 * 1000; /* 8.4V max */
         break;
@@ -226,6 +256,7 @@ static enum power_supply_property sc8886s_psy_props[] = {
     POWER_SUPPLY_PROP_ONLINE,
     POWER_SUPPLY_PROP_VOLTAGE_NOW,
     POWER_SUPPLY_PROP_CURRENT_NOW,
+    POWER_SUPPLY_PROP_CAPACITY,
     POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
     POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
 };
@@ -283,8 +314,14 @@ static int sc8886s_probe(struct i2c_client *client, const struct i2c_device_id *
     sc8886s_write_reg(chip, 0x01, 0x02);  /* WD_RST bit 9 */
     msleep(200);
 
-    /* Force EN_HIZ=0, CHRG_INHIBIT=0, WDTWR_ADJ=3 */
-    sc8886s_write_reg(chip, 0x00, 0x30);
+    /* Known-good CHARGE_OPTION0 (verified by board bring-up 2026-09-19):
+     * L = 0x0E: EN_IDPM|EN_LDO|IBAT_GAIN set, CHRG_INHIBIT=0
+     *   (0x30/0x00 leaves EN_IDPM=0/EN_LDO=0 -> zero input current!)
+     * H = 0x07: EN_LWPWR=0 (performance), WDTWR_ADJ=0 (watchdog OFF),
+     *           PWM_FREQ/EN_OOA/LOW_PTM_RIPPLE defaults kept
+     *   (WDTWR_ADJ=3 is WDT_175S per upstream enum, NOT disable!) */
+    sc8886s_write_reg(chip, 0x00, 0x0E);
+    sc8886s_write_reg(chip, 0x01, 0x07);
     msleep(200);
 
     /* Read device ID to confirm */
@@ -295,12 +332,11 @@ static int sc8886s_probe(struct i2c_client *client, const struct i2c_device_id *
     }
     dev_info(&client->dev, "SC8886S device ID: 0x%02x (expected 0x66)\n", val);
 
-    /* Init: 10-step blind charge config */
-    /* Step 1: WDTWR_ADJ=3 (disable watchdog) */
-    /* 0x01 bit 5-6 = 11 = 0x60 */
+    /* Init: blind charge config */
+    /* Step 1: WDTWR_ADJ=0 (WDT_DISABLE — enum: 0=off, 3=175s) */
     {
         struct field_info wdt = { SC8886S_REG_CHARGE_OPTION0_H, 5, 2 };
-        sc8886s_field_write(chip, wdt, 3);
+        sc8886s_field_write(chip, wdt, 0);
     }
     /* Step 2: CHRG_INHIBIT=0 (allow charge) */
     {
@@ -334,7 +370,11 @@ static int sc8886s_probe(struct i2c_client *client, const struct i2c_device_id *
 
     /* Register power supply */
     chip->psy_desc = sc8886s_psy_desc;
-    chip->psy = devm_power_supply_register(&client->dev, &chip->psy_desc, NULL);
+    {
+        /* without drv_data, get_property sees chip == NULL -> NULL deref */
+        struct power_supply_config psy_cfg = { .drv_data = chip, };
+        chip->psy = devm_power_supply_register(&client->dev, &chip->psy_desc, &psy_cfg);
+    }
     if (IS_ERR(chip->psy)) {
         dev_err(&client->dev, "Failed to register power supply\n");
         return PTR_ERR(chip->psy);
@@ -361,6 +401,13 @@ static const struct of_device_id sc8886s_of_match[] = {
 };
 MODULE_DEVICE_TABLE(of, sc8886s_of_match);
 
+/* legacy (new_device) instantiation requires an i2c_device_id table */
+static const struct i2c_device_id sc8886s_id[] = {
+    { "sc8886s_charger", 0 },
+    { }
+};
+MODULE_DEVICE_TABLE(i2c, sc8886s_id);
+
 static struct i2c_driver sc8886s_driver = {
     .driver = {
         .name = "sc8886s_charger",
@@ -368,6 +415,7 @@ static struct i2c_driver sc8886s_driver = {
     },
     .probe = sc8886s_probe,
     .remove = sc8886s_remove,
+    .id_table = sc8886s_id,
 };
 module_i2c_driver(sc8886s_driver);
 
