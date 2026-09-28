@@ -1,0 +1,22 @@
+--- a/drivers/soc/rockchip/pm_domains.c
++++ b/drivers/soc/rockchip/pm_domains.c
+@@ -677,8 +677,17 @@
+ 
+ 	return ret;
+ error:
+-	panic("panic_on_set_idle set ...\n");
+-	return ret;
++	/*
++	 * The Z96A board has a power domain whose idle-ack never completes,
++	 * on every kernel this board has run (the rk-6.1-rkr5.1 branch carried
++	 * a non-fatal workaround for exactly this). rkr7.2 turned the timeout
++	 * into an unconditional panic, which kills the boot at iommu probe.
++	 * Degrade to the rkr5.1 semantics instead: leave the domain off, keep
++	 * booting. The devices behind the stuck domain won't work.
++	 */
++	pr_err("rockchip-pmu: non-fatal error on domain '%s', continuing boot\n",
++	       genpd->name);
++	return 0;
+ }
+ 
+ int rockchip_pmu_idle_request(struct device *dev, bool idle)
