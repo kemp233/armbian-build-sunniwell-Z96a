@@ -609,20 +609,32 @@ function _rockchip_multimedia_build_vaapi() {
 	display_alert "rockchip-multimedia" "VA-API driver installed: usr/${lib_dir}/dri/rockchip_drv_video.so ($(stat -c '%s' "${va_out}") bytes)" "info"
 }
 
-# 桌面的显示管理器必须只剩 gdm3 一个。
+# 桌面的显示管理器必须只剩 gdm3 一个, 而且 display-manager.service 别名必须真的
+# 指向它。
 #
-# 板子实况 (26.5.1 bookworm, 2026-09-28 刷的):
-#   - lightdm 在镜像里, 而且 apt-cache rdepends --installed lightdm 是空的 ——
-#     纯孤儿包, 谁都没依赖它。
-#   - armbian 自己在 lib/functions/rootfs/rootfs-desktop.sh 的 desktop_postinstall()
-#     里提前 disable lightdm/gdm3/sddm, 但那一刻包还没装, disable 落空:
-#         Failed to disable unit, unit lightdm.service does not exist.
-#   - 于是 lightdm 带着 Debian 的默认 enabled 状态进镜像, 首次启动时抢在 gdm3
-#     前面起来。gdm3 一次都没跑过 (journalctl -u gdm3 -b 无条目),
-#     /etc/systemd/system/display-manager.service -> gdm3.service 这个软链是
-#     06:59 首次启动脚本建的, 建的时候 lightdm 已经在跑了。
-#   - lightdm 的自动登录配置还写着 user-session=xfce, 而 xfce 根本没装,
+# 板子实况 (26.5.1 bookworm, 2026-09-28 刷的), 2026-09-28 晚些时候上机更正:
+#   - 镜像里根本没有 lightdm —— 构建日志的 apt 装的是 GNOME 全家桶 + gdm3,
+#     metapackage 也只是 Recommends: gdm3。之前"lightdm 是镜像里的孤儿包"的
+#     判断是错的: 板上看到的 lightdm 是 06:58:51 首次开机后在运行的系统里
+#     现装的 (dpkg/apt 日志里有精确命令行, journal 里 useradd lightdm 同刻)。
+#   - 真正让开机没有显示管理器的是 armbian 自己: lib/functions/rootfs/
+#     rootfs-desktop.sh 的 desktop_postinstall() 在桌面包**装进去之前**就
+#     disable lightdm/gdm3/sddm。lightdm/sddm 那两条落空 (构建日志里
+#     "Failed to disable unit, unit lightdm.service does not exist.",
+#     当时包确实不存在), 但 gdm3 那条是**成功**的 —— 而 systemctl disable
+#     gdm3 会顺手把 gdm3.postinst 建的 /etc/systemd/system/display-manager.service
+#     别名一起摘掉, 之后没有任何东西把它接回来。板上证据: 06:56:24
+#     "Reached target graphical.target", gdm3 一条日志都没有, 一个 DM 都没起。
+#   - lightdm 首启被现装时 debconf 问默认 DM, 用户选了 gdm3 (别名 06:59:00
+#     重建指向 gdm3.service, /etc/X11/default-display-manager 也是 gdm3),
+#     但 lightdm 06:59:27 还是被直接拉起来了 —— 选择写进了配置, 却从没作用到
+#     正在跑的会话上。restart display-manager / 重启才会真正换到 gdm3。
+#   - 装上的 lightdm 自动登录配置还写着 user-session=xfce, 而 xfce 根本没装,
 #     于是回落到默认 GNOME 会话, 跑在 X11 上。
+#
+# 所以此处做两层守卫: lightdm 若在任何路径下混进镜像就 --purge 掉 (它是下面
+# 这条 X11 回退链的入口), 然后**显式 systemctl enable gdm3** —— 这一步才是把
+# 被 rootfs-desktop.sh 摘掉的别名接回来的关键, 不能指望包管理器自己恢复。
 #
 # 后果是 GPU 白装: Mali 这个 blob 只提供 EGL/GLESv2, 没有 libGLX, 也不报
 # EGL_EXT_platform_x11。X11 下 mutter 只能走 GLX, 于是
@@ -1032,13 +1044,10 @@ function pre_umount_final_image__rockchip_multimedia_verify() {
 		fi
 	fi
 
-	# 桌面用的显示管理器必须只有 gdm3 一个。这块板刷出来的 26.5.1 镜像里 lightdm
-	# 是**孤儿包** (apt-cache rdepends 空), 但它照样被 armbian 装进来了, 而且
-	# 默认 enabled —— armbian 自己在 lib/functions/rootfs/rootfs-desktop.sh 里
-	# 提前 disable lightdm, 那时候包还没装, 于是 disable 落空:
-	#     Failed to disable unit, unit lightdm.service does not exist.
-	# 结果首次启动时 lightdm 抢在 gdm3 前面起来, gdm3 一次都没跑过
-	# (journalctl -u gdm3 -b 是空的), gnome-session 的加速检测两条腿全断:
+	# 桌面用的显示管理器必须只有 gdm3 一个。板上复盘过的机制: rootfs-desktop.sh
+	# 提前 disable 了 gdm3 并顺手摘掉 display-manager.service 别名, 镜像开机时
+	# 一个 DM 都不会起; lightdm 一旦混进来就会带着 X11 会话顶上, gdm3 从此
+	# 没机会跑 (journalctl -u gdm3 -b 空), gnome-session 的加速检测两条腿全断:
 	#     libGL error: glx: failed to create dri3 screen
 	#     gnome-session-check-accelerated: GL Helper exited with code 512
 	#     gnome-session-c: eglGetDisplay() failed
