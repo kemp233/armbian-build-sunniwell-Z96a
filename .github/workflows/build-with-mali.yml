@@ -574,15 +574,22 @@ jobs:
           # 脚本 —— 它是一条装饰性的守卫, 看着在守着, 实际连一次都没生效过。
           # 本文件里曾经就有三条这种空转的断言。这里改成显式 if + 报错 +
           # exit 1, 结论不依赖 shell 对 ! 的处理。
+          # 断言消息一律走 **stdout**, 不要 >&2。踩过的坑: 2026-09-29 的 CI
+          # 连续两次红在 exit code 1 上, 而 `gh api .../actions/jobs/<id>/logs`
+          # 返回的文本里**一条 stderr 都没有** —— 断言明明报了"缺: xxx"、
+          # "模式不在 xxx 里", 日志里一个字都搜不到, 只能靠推理猜是哪条挂的,
+          # 前一次就把原因猜错了 (见下面 test -x 那段的注释)。GitHub 网页端能
+          # 显示 stderr, 但 API 端点不能, 而排查靠的是 API。所以全部走 stdout。
+
           assert_present() {
             if ! grep -qE "$1" "$2"; then
-              echo "断言失败: 必需的模式 '$1' 不在 $2 里" >&2
+              echo "断言失败: 必需的模式 '$1' 不在 $2 里"
               exit 1
             fi
           }
           assert_absent() {
             if grep -qE "$1" "$2"; then
-              echo "断言失败: 不该出现的模式 '$1' 出现在 $2 里" >&2
+              echo "断言失败: 不该出现的模式 '$1' 出现在 $2 里"
               exit 1
             fi
           }
@@ -591,22 +598,22 @@ jobs:
           # exit code 1, 没人知道缺的是哪个文件。
           assert_exists() {
             if [ ! -e "$1" ]; then
-              echo "断言失败: 必需的文件不存在: $1" >&2
+              echo "断言失败: 必需的文件不存在: $1"
               exit 1
             fi
           }
           # 整行匹配 (kernel config 的每一项都必须占满一整行)。
           assert_line() {
             if ! grep -qxF "$1" "$2"; then
-              echo "断言失败: $2 里没有整行 '$1'" >&2
-              echo "  文件当前 $(wc -l < "$2") 行, 大小 $(wc -c < "$2") 字节" >&2
+              echo "断言失败: $2 里没有整行 '$1'"
+              echo "  文件当前 $(wc -l < "$2") 行, 大小 $(wc -c < "$2") 字节"
               exit 1
             fi
           }
           # 行内匹配 (任意位置出现即可)。
           assert_match() {
             if ! grep -qE "$1" "$2"; then
-              echo "断言失败: '$1' 不在 $2 里" >&2
+              echo "断言失败: '$1' 不在 $2 里"
               exit 1
             fi
           }
@@ -639,7 +646,7 @@ jobs:
             if [ -e "$probe" ]; then
               echo "  有: $probe"
             else
-              echo "  缺: $probe" >&2
+              echo "  缺: $probe"
               exit 1
             fi
           done
@@ -664,8 +671,8 @@ jobs:
             if [ "$mode" = "100755" ]; then
               echo "  git 索引: $mode (可执行) $exe"
             else
-              echo "断言失败: $exe 在 git 索引里的模式是 '$mode', 不是 100755" >&2
-              echo "  build 阶段会 exec 它, 索引里不是可执行就是 Permission denied" >&2
+              echo "断言失败: $exe 在 git 索引里的模式是 '$mode', 不是 100755"
+              echo "  build 阶段会 exec 它, 索引里不是可执行就是 Permission denied"
               exit 1
             fi
           done
@@ -702,9 +709,9 @@ jobs:
           #   dt/  和 drivers/             —— 板级数据, 原样拷贝, 不是补丁
           # 再往这里塞 .patch 就是"同一处代码存在两份", 迟早有一份不生效。
           if find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | grep -q .; then
-            echo "断言失败: legacy/ 下不该再有 .patch —— 9 个内核修复已并入 rk-6.1-rkr7.2, 再打一遍就是同一处代码两份" >&2
-            echo "  注意: 补丁可能不是来自本仓库, 而是 momokind/armbian-build 自带、又被 rsync 合并回来的" >&2
-            find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | sed 's/^/  多余的: /' >&2
+            echo "断言失败: legacy/ 下不该再有 .patch —— 9 个内核修复已并入 rk-6.1-rkr7.2, 再打一遍就是同一处代码两份"
+            echo "  注意: 补丁可能不是来自本仓库, 而是 momokind/armbian-build 自带、又被 rsync 合并回来的"
+            find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | sed 's/^/  多余的: /'
             exit 1
           fi
           test -d patch/kernel/rockchip-rk3568-z96a/legacy/dt
