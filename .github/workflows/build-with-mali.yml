@@ -531,8 +531,23 @@ jobs:
           done
           cd "$GITHUB_WORKSPACE"
 
-          # The upstream kernel fork already contains the RK817 support.
-          rm -fv patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+          # The upstream kernel fork already contains these fixes, so the
+          # patches must not be applied on top of an already-patched tree.
+          #
+          # They are not in our repo -- commit 91d4db731 deleted them there.
+          # They come back from momokind/armbian-build, which still ships its
+          # own patch/kernel/rockchip-rk3568-z96a/legacy/{z96a-rk817,z96a_cec_
+          # deadlock}.patch, and the rsync above MERGES rather than replaces,
+          # so the framework's copies survive. Both are part of c16c640e45a9
+          # (that commit touches dw-hdmi.c by the same 4 lines).
+          #
+          # z96a-rk817.patch was already being removed here; z96a_cec_deadlock
+          # was missed, and because the "no .patch left in legacy/" assertion
+          # was written as `! find ... | grep -q .` it never fired -- set -e
+          # does not trigger on a command whose status is inverted with `!`.
+          for stale in z96a-rk817.patch z96a_cec_deadlock.patch; do
+            rm -fv "patch/kernel/rockchip-rk3568-z96a/legacy/$stale"
+          done
 
           test -f config/boards/z96a-v2.conf
           test -f config/kernel/linux-rockchip-rk3568-z96a-legacy.config
@@ -623,6 +638,8 @@ jobs:
           # 再往这里塞 .patch 就是"同一处代码存在两份", 迟早有一份不生效。
           if find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | grep -q .; then
             echo "断言失败: legacy/ 下不该再有 .patch —— 9 个内核修复已并入 rk-6.1-rkr7.2, 再打一遍就是同一处代码两份" >&2
+            echo "  注意: 补丁可能不是来自本仓库, 而是 momokind/armbian-build 自带、又被 rsync 合并回来的" >&2
+            find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | sed 's/^/  多余的: /' >&2
             exit 1
           fi
           test -d patch/kernel/rockchip-rk3568-z96a/legacy/dt
