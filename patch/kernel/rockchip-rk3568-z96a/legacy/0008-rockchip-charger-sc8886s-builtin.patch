@@ -31,13 +31,14 @@ diff --git a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
 index 5789446..8022ed0 100644
 --- a/drivers/power/supply/Makefile
 +++ b/drivers/power/supply/Makefile
-@@ -124,4 +124,4 @@ obj-$(CONFIG_BATTERY_SURFACE)	+= surface_battery.o
+@@ -124,4 +124,5 @@ obj-$(CONFIG_BATTERY_SURFACE)	+= surface_battery.o
  obj-$(CONFIG_CHARGER_SURFACE)	+= surface_charger.o
  obj-$(CONFIG_BATTERY_UG3105)	+= ug3105_battery.o
  
 -obj-$(CONFIG_NANOPI_ADC_POWER)	+= nanopi_adc_power.o
 \ No newline at end of file
-+obj-$(CONFIG_NANOPI_ADC_POWER)	+= nanopi_adc_power.oobj-$(CONFIG_CHARGER_SC8886S)	+= sc8886s_charger.o
++obj-$(CONFIG_NANOPI_ADC_POWER)	+= nanopi_adc_power.o
++obj-$(CONFIG_CHARGER_SC8886S)	+= sc8886s_charger.o
 diff --git a/drivers/power/supply/sc8886s_charger.c b/drivers/power/supply/sc8886s_charger.c
 new file mode 100644
 index 0000000..6d0830f

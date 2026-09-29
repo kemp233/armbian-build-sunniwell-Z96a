@@ -1,10 +1,13 @@
 [Unit]
-Description=SC8886 Battery Charger Init & Watchdog Disable
+Description=SC8886 Battery Charger Init & Watchdog Disable (fallback when no kernel driver bound)
+# 正常情况下 0008 的 builtin sc8886s_charger 驱动会在 probe 时完成
+# 配置 (关看门狗/限流/ADC) 并每 5s 监控, 本服务只在驱动未绑定时兜底。
+# 用 /bin/bash 调用, 不依赖脚本的可执行位 (真机教训: 644 导致 203/EXEC)。
 After=multi-user.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/init-sc8886.sh
+ExecStart=/bin/bash -c 'if [ -d /sys/bus/i2c/devices/0-006b/driver ]; then echo "sc8886s kernel driver bound; userspace init skipped"; else exec /usr/local/bin/init-sc8886.sh; fi'
 RemainAfterExit=yes
 
 [Install]
