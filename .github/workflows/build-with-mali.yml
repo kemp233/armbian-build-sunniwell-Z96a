@@ -525,11 +525,22 @@ jobs:
           # /boot/uInitrd is never created, and the board drops to the U-Boot
           # prompt with "Wrong Ramdisk Image Format" (boot failed err=-14).
           cd "$GITHUB_WORKSPACE/z96a-repo"
+          # 必须同时覆盖 rsync **之后**的路径。只 chmod "../$f"(即 custom/ 下的
+          # 原始位置)是不够的 —— step 8 早就把 custom/extensions/ 整个 rsync 到了
+          # 框架根的 extensions/, verify 步骤断言的是 extensions/ 下那一份, 而
+          # rsync 落地时权限位来自 zip 解包(一律 0644)。于是:
+          #   2026-09-29 run 36557872353 就死在这里 ——
+          #   `test -x extensions/z96a-desktop-fix/overlay/usr/lib/armbian/
+          #    z96a-desktop-setup` 失败, 尽管 git 索引里它是 100755。
+          # 一个后缀是空的 rsync 目标 ($f 去掉 custom/ 前缀) 才是 verify 真正
+          # 检查的那份; 原始位置也一起补上, 供 extension 自己 exec。
           git ls-files -s | awk '$1=="100755"{print $4}' | while IFS= read -r f; do
-            if [ -f "../$f" ]; then
-              chmod 755 "../$f"
-              echo "restored exec bit: $f"
-            fi
+            for target in "../$f" "../${f#custom/}"; do
+              if [ -f "$target" ]; then
+                chmod 755 "$target"
+                echo "restored exec bit: $target"
+              fi
+            done
           done
           cd "$GITHUB_WORKSPACE"
 
@@ -761,9 +772,25 @@ jobs:
           DESKTOP_SETUP_UNIT="$Z96A_FIX_EXT/overlay/usr/lib/systemd/system/z96a-desktop-setup.service"
           GNOME_PKGS="config/desktop/buster/environments/gnome/config_base/packages"
 
-          test -f "$DESKTOP_FIX_SH"
-          test -x "$DESKTOP_SETUP"
-          test -f "$DESKTOP_SETUP_UNIT"
+          # 这三条用会报原因的写法, 不用裸 test —— run 36557872353 就是死在
+          # 上面那条裸 `test -x "$DESKTOP_SETUP"` 上, 而 set -e 下它只留一个
+          # 退出码 1, 不告诉你缺的是文件还是权限位。权限位这条路尤其阴:
+          # 文件在, 但从 zip 解包出来是 0644。
+          assert_exists "$DESKTOP_FIX_SH"
+          if [ ! -e "$DESKTOP_SETUP" ]; then
+            echo "断言失败: 必需的文件不存在: $DESKTOP_SETUP"
+            echo "  注意: 它在 git 索引里应是 100755, 走 extensions/ 这条 rsync 后的路径"
+            exit 1
+          fi
+          if [ ! -x "$DESKTOP_SETUP" ]; then
+            echo "断言失败: 存在但不可执行: $DESKTOP_SETUP"
+            echo "  实际权限: $(stat -c '%A' "$DESKTOP_SETUP")  (期望 -rwxr-xr-x)"
+            echo "  索引模式: $(git -C z96a-repo ls-files -s -- "custom/extensions/z96a-desktop-fix/overlay/usr/lib/armbian/z96a-desktop-setup" | cut -d' ' -f1)"
+            echo "  成因: GitHub artifact 走 zip, 不保留 Unix 权限位; 恢复 exec 位的"
+            echo "        循环必须同时覆盖 rsync 后的 extensions/ 路径, 而不只是 custom/ 下的原始位置"
+            exit 1
+          fi
+          assert_exists "$DESKTOP_SETUP_UNIT"
           # 非注释行; code_grep 是唯一允许的入口, 杜绝再写回裸 grep
           FIX_SH_CODE="$(mktemp)"
           grep -v '^[[:space:]]*#' "$DESKTOP_FIX_SH" > "$FIX_SH_CODE"
