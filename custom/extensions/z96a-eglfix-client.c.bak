@@ -1,0 +1,468 @@
+/* libEGL.so.1 — libmali g24p0 修复转发层 (Z96A v2 客户端版)
+ * 真机定律:
+ *   - 合成器 (gnome-shell/Xwayland) 走 wrapper+hook; 客户端直连裸 mali。
+ *     本库只给客户端用 (LD_LIBRARY_PATH 指入), 系统原版 wrapper 不动。
+ *   - blob 的 eglCreateContext: 0x3098 → BAD_DISPLAY; NULL 指针 → 段错误;
+ *     空 attrib_list / 无关 token → 正常。策略: 剥 0x3098 → 空表 → NULL。
+ *   - blob 的 eglGetDisplay(default/X11) 初始化必败 (只认 wayland/gbm
+ *     原生 display) → default display 改道系统 libgbm 的 GBM 设备。
+ *   - 全部转发槽位在加载期由构造器填满 (eglGetDisplay 常是首调)。 */
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+static void *hook;
+static void *mali;
+static void *(*r_create)(void*, void*, void*, const int*);
+static void *(*r_gpa)(const char*);
+static void *(*r_getdisplay)(void*);
+static void *(*gbm_create_device)(int);
+static void *gbm_dev;
+static void *gbm_handle;
+static void *gbm_real_display;
+extern void *_r_eglBindAPI;
+extern void *_r_eglBindTexImage;
+extern void *_r_eglChooseConfig;
+extern void *_r_eglClientWaitSync;
+extern void *_r_eglClientWaitSyncKHR;
+extern void *_r_eglCopyBuffers;
+extern void *_r_eglCreateImage;
+extern void *_r_eglCreateImageKHR;
+extern void *_r_eglCreatePbufferFromClientBuffer;
+extern void *_r_eglCreatePbufferSurface;
+extern void *_r_eglCreatePixmapSurface;
+extern void *_r_eglCreatePlatformPixmapSurface;
+extern void *_r_eglCreatePlatformWindowSurface;
+extern void *_r_eglCreateSync;
+extern void *_r_eglCreateSyncImpl;
+extern void *_r_eglCreateSyncKHR;
+extern void *_r_eglCreateWindowSurface;
+extern void *_r_eglDestroyContext;
+extern void *_r_eglDestroyImage;
+extern void *_r_eglDestroyImageKHR;
+extern void *_r_eglDestroySurface;
+extern void *_r_eglDestroySync;
+extern void *_r_eglDestroySyncKHR;
+extern void *_r_eglExportDMABUFImageMESA;
+extern void *_r_eglExportDMABUFImageQueryMESA;
+extern void *_r_eglGetConfigAttrib;
+extern void *_r_eglGetConfigs;
+extern void *_r_eglGetCurrentContext;
+extern void *_r_eglGetCurrentDisplay;
+extern void *_r_eglGetCurrentSurface;
+extern void *_r_eglGetError;
+extern void *_r_eglGetPlatformDisplay;
+extern void *_r_eglGetSyncAttrib;
+extern void *_r_eglGetSyncAttribKHR;
+extern void *_r_eglInitialize;
+extern void *_r_eglMakeCurrent;
+extern void *_r_eglQueryAPI;
+extern void *_r_eglQueryContext;
+extern void *_r_eglQueryDmaBufFormatsEXT;
+extern void *_r_eglQueryDmaBufModifiersEXT;
+extern void *_r_eglQueryString;
+extern void *_r_eglQuerySurface;
+extern void *_r_eglReleaseTexImage;
+extern void *_r_eglReleaseThread;
+extern void *_r_eglSetDamageRegionKHR;
+extern void *_r_eglSurfaceAttrib;
+extern void *_r_eglSwapBuffers;
+extern void *_r_eglSwapInterval;
+extern void *_r_eglTerminate;
+extern void *_r_eglWaitClient;
+extern void *_r_eglWaitGL;
+extern void *_r_eglWaitNative;
+extern void *_r_eglWaitSync;
+extern void *_r_eglWaitSyncKHR;
+extern void *_r_egl_cobj_surface_format_create;
+extern void *_r_egl_color_buffer_flush_mapping_to_cpu;
+extern void *_r_egl_color_buffer_flush_mapping_to_gpu;
+extern void *_r_egl_color_buffer_get_age;
+extern void *_r_egl_color_buffer_get_block_stride;
+extern void *_r_egl_color_buffer_get_cached_bo;
+extern void *_r_egl_color_buffer_get_early_display;
+extern void *_r_egl_color_buffer_get_fence;
+extern void *_r_egl_color_buffer_get_format;
+extern void *_r_egl_color_buffer_get_height;
+extern void *_r_egl_color_buffer_get_mapped_address;
+extern void *_r_egl_color_buffer_get_non_thread_safe;
+extern void *_r_egl_color_buffer_get_num_planes;
+extern void *_r_egl_color_buffer_get_plane_dims;
+extern void *_r_egl_color_buffer_get_private_buffer_info;
+extern void *_r_egl_color_buffer_get_private_data;
+extern void *_r_egl_color_buffer_get_rotation;
+extern void *_r_egl_color_buffer_get_width;
+extern void *_r_egl_color_buffer_get_y_inversion;
+extern void *_r_egl_color_buffer_get_yuva_comp_sizes;
+extern void *_r_egl_color_buffer_group_create;
+extern void *_r_egl_color_buffer_group_free;
+extern void *_r_egl_color_buffer_group_get_layer;
+extern void *_r_egl_color_buffer_group_get_num_layers;
+extern void *_r_egl_color_buffer_group_set_layer;
+extern void *_r_egl_color_buffer_increment_age;
+extern void *_r_egl_color_buffer_is_protected;
+extern void *_r_egl_color_buffer_map;
+extern void *_r_egl_color_buffer_new;
+extern void *_r_egl_color_buffer_release;
+extern void *_r_egl_color_buffer_retain;
+extern void *_r_egl_color_buffer_rgb_format_get_bpp;
+extern void *_r_egl_color_buffer_set_age;
+extern void *_r_egl_color_buffer_set_cached_bo;
+extern void *_r_egl_color_buffer_set_early_display;
+extern void *_r_egl_color_buffer_set_fence;
+extern void *_r_egl_color_buffer_set_non_thread_safe;
+extern void *_r_egl_color_buffer_set_private_buffer_info;
+extern void *_r_egl_color_buffer_set_private_data;
+extern void *_r_egl_color_buffer_set_rotation;
+extern void *_r_egl_color_buffer_set_transform;
+extern void *_r_egl_color_buffer_unmap;
+extern void *_r_egl_color_buffer_wrap_external;
+extern void *_r_egl_color_buffer_wrap_external_planar;
+extern void *_r_egl_display_release;
+extern void *_r_egl_env_set;
+extern void *_r_egl_get_winsys_display;
+extern void *_r_egl_get_winsys_surface;
+extern void *_r_egl_register_gles_blob_cache_callbacks;
+extern void *_r_egl_surface_release;
+extern void *_r_egl_winsys_get_implementation;
+extern void *_r_egl_winsys_get_implementation_gbm;
+extern void *_r_eglp_call_get_winsys_format_from_eglp_config;
+extern void *_r_eglp_check_attribute_present;
+extern void *_r_eglp_config_set_attributes;
+extern void *_r_eglp_display_create_default_configs;
+extern void *_r_eglp_find_unterminated_state;
+extern void *_r_eglp_get_attribute_value;
+extern void *_r_eglp_has_display_terminated;
+extern void *_r_eglp_read_write_buffer;
+extern void *_r_eglp_wait_buffer_displayed;
+static int is_compositor(void) {
+    char comm[64] = {0};
+    FILE *f = fopen("/proc/self/comm", "r");
+    if (!f) return 0;
+    size_t n = fread(comm, 1, sizeof(comm) - 1, f);
+    fclose(f);
+    (void)n;
+    return strncmp(comm, "gnome-shell", 11) == 0
+        || strncmp(comm, "Xwayland", 8) == 0;
+}
+static void *ensure(void) {
+    if (mali) return mali;
+    if (is_compositor()) {
+        hook = dlopen("/usr/lib/aarch64-linux-gnu/mali-egl/libmali-hook.so.1", RTLD_NOW|RTLD_GLOBAL);
+        mali = dlopen("/usr/lib/aarch64-linux-gnu/mali-egl/libmali.so.1.9.0", RTLD_NOW|RTLD_GLOBAL);
+        if (!mali) return 0;
+        r_gpa = dlsym(hook, "eglGetProcAddress");
+        if (!r_gpa) r_gpa = dlsym(mali, "eglGetProcAddress");
+        r_create = r_gpa ? r_gpa("eglCreateContext") : 0;
+        if (!r_create) r_create = dlsym(mali, "eglCreateContext");
+        r_getdisplay = dlsym(hook, "eglGetDisplay");
+        if (!r_getdisplay) r_getdisplay = dlsym(mali, "eglGetDisplay");
+        static const struct { const char *n; void **p; } th[] = {
+    { "eglBindAPI", (void**)&_r_eglBindAPI },
+    { "eglBindTexImage", (void**)&_r_eglBindTexImage },
+    { "eglChooseConfig", (void**)&_r_eglChooseConfig },
+    { "eglClientWaitSync", (void**)&_r_eglClientWaitSync },
+    { "eglClientWaitSyncKHR", (void**)&_r_eglClientWaitSyncKHR },
+    { "eglCopyBuffers", (void**)&_r_eglCopyBuffers },
+    { "eglCreateImage", (void**)&_r_eglCreateImage },
+    { "eglCreateImageKHR", (void**)&_r_eglCreateImageKHR },
+    { "eglCreatePbufferFromClientBuffer", (void**)&_r_eglCreatePbufferFromClientBuffer },
+    { "eglCreatePbufferSurface", (void**)&_r_eglCreatePbufferSurface },
+    { "eglCreatePixmapSurface", (void**)&_r_eglCreatePixmapSurface },
+    { "eglCreatePlatformPixmapSurface", (void**)&_r_eglCreatePlatformPixmapSurface },
+    { "eglCreatePlatformWindowSurface", (void**)&_r_eglCreatePlatformWindowSurface },
+    { "eglCreateSync", (void**)&_r_eglCreateSync },
+    { "eglCreateSyncImpl", (void**)&_r_eglCreateSyncImpl },
+    { "eglCreateSyncKHR", (void**)&_r_eglCreateSyncKHR },
+    { "eglCreateWindowSurface", (void**)&_r_eglCreateWindowSurface },
+    { "eglDestroyContext", (void**)&_r_eglDestroyContext },
+    { "eglDestroyImage", (void**)&_r_eglDestroyImage },
+    { "eglDestroyImageKHR", (void**)&_r_eglDestroyImageKHR },
+    { "eglDestroySurface", (void**)&_r_eglDestroySurface },
+    { "eglDestroySync", (void**)&_r_eglDestroySync },
+    { "eglDestroySyncKHR", (void**)&_r_eglDestroySyncKHR },
+    { "eglExportDMABUFImageMESA", (void**)&_r_eglExportDMABUFImageMESA },
+    { "eglExportDMABUFImageQueryMESA", (void**)&_r_eglExportDMABUFImageQueryMESA },
+    { "eglGetConfigAttrib", (void**)&_r_eglGetConfigAttrib },
+    { "eglGetConfigs", (void**)&_r_eglGetConfigs },
+    { "eglGetCurrentContext", (void**)&_r_eglGetCurrentContext },
+    { "eglGetCurrentDisplay", (void**)&_r_eglGetCurrentDisplay },
+    { "eglGetCurrentSurface", (void**)&_r_eglGetCurrentSurface },
+    { "eglGetError", (void**)&_r_eglGetError },
+    { "eglGetPlatformDisplay", (void**)&_r_eglGetPlatformDisplay },
+    { "eglGetSyncAttrib", (void**)&_r_eglGetSyncAttrib },
+    { "eglGetSyncAttribKHR", (void**)&_r_eglGetSyncAttribKHR },
+    { "eglInitialize", (void**)&_r_eglInitialize },
+    { "eglMakeCurrent", (void**)&_r_eglMakeCurrent },
+    { "eglQueryAPI", (void**)&_r_eglQueryAPI },
+    { "eglQueryContext", (void**)&_r_eglQueryContext },
+    { "eglQueryDmaBufFormatsEXT", (void**)&_r_eglQueryDmaBufFormatsEXT },
+    { "eglQueryDmaBufModifiersEXT", (void**)&_r_eglQueryDmaBufModifiersEXT },
+    { "eglQueryString", (void**)&_r_eglQueryString },
+    { "eglQuerySurface", (void**)&_r_eglQuerySurface },
+    { "eglReleaseTexImage", (void**)&_r_eglReleaseTexImage },
+    { "eglReleaseThread", (void**)&_r_eglReleaseThread },
+    { "eglSetDamageRegionKHR", (void**)&_r_eglSetDamageRegionKHR },
+    { "eglSurfaceAttrib", (void**)&_r_eglSurfaceAttrib },
+    { "eglSwapBuffers", (void**)&_r_eglSwapBuffers },
+    { "eglSwapInterval", (void**)&_r_eglSwapInterval },
+    { "eglTerminate", (void**)&_r_eglTerminate },
+    { "eglWaitClient", (void**)&_r_eglWaitClient },
+    { "eglWaitGL", (void**)&_r_eglWaitGL },
+    { "eglWaitNative", (void**)&_r_eglWaitNative },
+    { "eglWaitSync", (void**)&_r_eglWaitSync },
+    { "eglWaitSyncKHR", (void**)&_r_eglWaitSyncKHR },
+    { "egl_cobj_surface_format_create", (void**)&_r_egl_cobj_surface_format_create },
+    { "egl_color_buffer_flush_mapping_to_cpu", (void**)&_r_egl_color_buffer_flush_mapping_to_cpu },
+    { "egl_color_buffer_flush_mapping_to_gpu", (void**)&_r_egl_color_buffer_flush_mapping_to_gpu },
+    { "egl_color_buffer_get_age", (void**)&_r_egl_color_buffer_get_age },
+    { "egl_color_buffer_get_block_stride", (void**)&_r_egl_color_buffer_get_block_stride },
+    { "egl_color_buffer_get_cached_bo", (void**)&_r_egl_color_buffer_get_cached_bo },
+    { "egl_color_buffer_get_early_display", (void**)&_r_egl_color_buffer_get_early_display },
+    { "egl_color_buffer_get_fence", (void**)&_r_egl_color_buffer_get_fence },
+    { "egl_color_buffer_get_format", (void**)&_r_egl_color_buffer_get_format },
+    { "egl_color_buffer_get_height", (void**)&_r_egl_color_buffer_get_height },
+    { "egl_color_buffer_get_mapped_address", (void**)&_r_egl_color_buffer_get_mapped_address },
+    { "egl_color_buffer_get_non_thread_safe", (void**)&_r_egl_color_buffer_get_non_thread_safe },
+    { "egl_color_buffer_get_num_planes", (void**)&_r_egl_color_buffer_get_num_planes },
+    { "egl_color_buffer_get_plane_dims", (void**)&_r_egl_color_buffer_get_plane_dims },
+    { "egl_color_buffer_get_private_buffer_info", (void**)&_r_egl_color_buffer_get_private_buffer_info },
+    { "egl_color_buffer_get_private_data", (void**)&_r_egl_color_buffer_get_private_data },
+    { "egl_color_buffer_get_rotation", (void**)&_r_egl_color_buffer_get_rotation },
+    { "egl_color_buffer_get_width", (void**)&_r_egl_color_buffer_get_width },
+    { "egl_color_buffer_get_y_inversion", (void**)&_r_egl_color_buffer_get_y_inversion },
+    { "egl_color_buffer_get_yuva_comp_sizes", (void**)&_r_egl_color_buffer_get_yuva_comp_sizes },
+    { "egl_color_buffer_group_create", (void**)&_r_egl_color_buffer_group_create },
+    { "egl_color_buffer_group_free", (void**)&_r_egl_color_buffer_group_free },
+    { "egl_color_buffer_group_get_layer", (void**)&_r_egl_color_buffer_group_get_layer },
+    { "egl_color_buffer_group_get_num_layers", (void**)&_r_egl_color_buffer_group_get_num_layers },
+    { "egl_color_buffer_group_set_layer", (void**)&_r_egl_color_buffer_group_set_layer },
+    { "egl_color_buffer_increment_age", (void**)&_r_egl_color_buffer_increment_age },
+    { "egl_color_buffer_is_protected", (void**)&_r_egl_color_buffer_is_protected },
+    { "egl_color_buffer_map", (void**)&_r_egl_color_buffer_map },
+    { "egl_color_buffer_new", (void**)&_r_egl_color_buffer_new },
+    { "egl_color_buffer_release", (void**)&_r_egl_color_buffer_release },
+    { "egl_color_buffer_retain", (void**)&_r_egl_color_buffer_retain },
+    { "egl_color_buffer_rgb_format_get_bpp", (void**)&_r_egl_color_buffer_rgb_format_get_bpp },
+    { "egl_color_buffer_set_age", (void**)&_r_egl_color_buffer_set_age },
+    { "egl_color_buffer_set_cached_bo", (void**)&_r_egl_color_buffer_set_cached_bo },
+    { "egl_color_buffer_set_early_display", (void**)&_r_egl_color_buffer_set_early_display },
+    { "egl_color_buffer_set_fence", (void**)&_r_egl_color_buffer_set_fence },
+    { "egl_color_buffer_set_non_thread_safe", (void**)&_r_egl_color_buffer_set_non_thread_safe },
+    { "egl_color_buffer_set_private_buffer_info", (void**)&_r_egl_color_buffer_set_private_buffer_info },
+    { "egl_color_buffer_set_private_data", (void**)&_r_egl_color_buffer_set_private_data },
+    { "egl_color_buffer_set_rotation", (void**)&_r_egl_color_buffer_set_rotation },
+    { "egl_color_buffer_set_transform", (void**)&_r_egl_color_buffer_set_transform },
+    { "egl_color_buffer_unmap", (void**)&_r_egl_color_buffer_unmap },
+    { "egl_color_buffer_wrap_external", (void**)&_r_egl_color_buffer_wrap_external },
+    { "egl_color_buffer_wrap_external_planar", (void**)&_r_egl_color_buffer_wrap_external_planar },
+    { "egl_display_release", (void**)&_r_egl_display_release },
+    { "egl_env_set", (void**)&_r_egl_env_set },
+    { "egl_get_winsys_display", (void**)&_r_egl_get_winsys_display },
+    { "egl_get_winsys_surface", (void**)&_r_egl_get_winsys_surface },
+    { "egl_register_gles_blob_cache_callbacks", (void**)&_r_egl_register_gles_blob_cache_callbacks },
+    { "egl_surface_release", (void**)&_r_egl_surface_release },
+    { "egl_winsys_get_implementation", (void**)&_r_egl_winsys_get_implementation },
+    { "egl_winsys_get_implementation_gbm", (void**)&_r_egl_winsys_get_implementation_gbm },
+    { "eglp_call_get_winsys_format_from_eglp_config", (void**)&_r_eglp_call_get_winsys_format_from_eglp_config },
+    { "eglp_check_attribute_present", (void**)&_r_eglp_check_attribute_present },
+    { "eglp_config_set_attributes", (void**)&_r_eglp_config_set_attributes },
+    { "eglp_display_create_default_configs", (void**)&_r_eglp_display_create_default_configs },
+    { "eglp_find_unterminated_state", (void**)&_r_eglp_find_unterminated_state },
+    { "eglp_get_attribute_value", (void**)&_r_eglp_get_attribute_value },
+    { "eglp_has_display_terminated", (void**)&_r_eglp_has_display_terminated },
+    { "eglp_read_write_buffer", (void**)&_r_eglp_read_write_buffer },
+    { "eglp_wait_buffer_displayed", (void**)&_r_eglp_wait_buffer_displayed }
+        };
+        for (unsigned i = 0; i < sizeof(th)/sizeof(th[0]); i++) {
+            *th[i].p = dlsym(hook, th[i].n);
+            if (!*th[i].p) *th[i].p = dlsym(mali, th[i].n);
+        }
+    } else {
+        mali = dlopen("/usr/lib/aarch64-linux-gnu/mali-egl/libmali.so.1.9.0", RTLD_NOW|RTLD_GLOBAL);
+        if (!mali) return 0;
+        r_create     = dlsym(mali, "eglCreateContext");
+        r_gpa        = dlsym(mali, "eglGetProcAddress");
+        r_getdisplay = dlsym(mali, "eglGetDisplay");
+        /* 必须用 mali 自己的 libgbm 壳: blob 的 GBM platform 只认自家设备 */
+        gbm_handle = dlopen("/usr/lib/aarch64-linux-gnu/mali-egl/libgbm.so.1", RTLD_NOW|RTLD_LOCAL);
+        if (gbm_handle) gbm_create_device = dlsym(gbm_handle, "gbm_create_device");
+        static const struct { const char *n; void **p; } tc[] = {
+    { "eglBindAPI", (void**)&_r_eglBindAPI },
+    { "eglBindTexImage", (void**)&_r_eglBindTexImage },
+    { "eglChooseConfig", (void**)&_r_eglChooseConfig },
+    { "eglClientWaitSync", (void**)&_r_eglClientWaitSync },
+    { "eglClientWaitSyncKHR", (void**)&_r_eglClientWaitSyncKHR },
+    { "eglCopyBuffers", (void**)&_r_eglCopyBuffers },
+    { "eglCreateImage", (void**)&_r_eglCreateImage },
+    { "eglCreateImageKHR", (void**)&_r_eglCreateImageKHR },
+    { "eglCreatePbufferFromClientBuffer", (void**)&_r_eglCreatePbufferFromClientBuffer },
+    { "eglCreatePbufferSurface", (void**)&_r_eglCreatePbufferSurface },
+    { "eglCreatePixmapSurface", (void**)&_r_eglCreatePixmapSurface },
+    { "eglCreatePlatformPixmapSurface", (void**)&_r_eglCreatePlatformPixmapSurface },
+    { "eglCreatePlatformWindowSurface", (void**)&_r_eglCreatePlatformWindowSurface },
+    { "eglCreateSync", (void**)&_r_eglCreateSync },
+    { "eglCreateSyncImpl", (void**)&_r_eglCreateSyncImpl },
+    { "eglCreateSyncKHR", (void**)&_r_eglCreateSyncKHR },
+    { "eglCreateWindowSurface", (void**)&_r_eglCreateWindowSurface },
+    { "eglDestroyContext", (void**)&_r_eglDestroyContext },
+    { "eglDestroyImage", (void**)&_r_eglDestroyImage },
+    { "eglDestroyImageKHR", (void**)&_r_eglDestroyImageKHR },
+    { "eglDestroySurface", (void**)&_r_eglDestroySurface },
+    { "eglDestroySync", (void**)&_r_eglDestroySync },
+    { "eglDestroySyncKHR", (void**)&_r_eglDestroySyncKHR },
+    { "eglExportDMABUFImageMESA", (void**)&_r_eglExportDMABUFImageMESA },
+    { "eglExportDMABUFImageQueryMESA", (void**)&_r_eglExportDMABUFImageQueryMESA },
+    { "eglGetConfigAttrib", (void**)&_r_eglGetConfigAttrib },
+    { "eglGetConfigs", (void**)&_r_eglGetConfigs },
+    { "eglGetCurrentContext", (void**)&_r_eglGetCurrentContext },
+    { "eglGetCurrentDisplay", (void**)&_r_eglGetCurrentDisplay },
+    { "eglGetCurrentSurface", (void**)&_r_eglGetCurrentSurface },
+    { "eglGetError", (void**)&_r_eglGetError },
+    { "eglGetPlatformDisplay", (void**)&_r_eglGetPlatformDisplay },
+    { "eglGetSyncAttrib", (void**)&_r_eglGetSyncAttrib },
+    { "eglGetSyncAttribKHR", (void**)&_r_eglGetSyncAttribKHR },
+    { "eglInitialize", (void**)&_r_eglInitialize },
+    { "eglMakeCurrent", (void**)&_r_eglMakeCurrent },
+    { "eglQueryAPI", (void**)&_r_eglQueryAPI },
+    { "eglQueryContext", (void**)&_r_eglQueryContext },
+    { "eglQueryDmaBufFormatsEXT", (void**)&_r_eglQueryDmaBufFormatsEXT },
+    { "eglQueryDmaBufModifiersEXT", (void**)&_r_eglQueryDmaBufModifiersEXT },
+    { "eglQueryString", (void**)&_r_eglQueryString },
+    { "eglQuerySurface", (void**)&_r_eglQuerySurface },
+    { "eglReleaseTexImage", (void**)&_r_eglReleaseTexImage },
+    { "eglReleaseThread", (void**)&_r_eglReleaseThread },
+    { "eglSetDamageRegionKHR", (void**)&_r_eglSetDamageRegionKHR },
+    { "eglSurfaceAttrib", (void**)&_r_eglSurfaceAttrib },
+    { "eglSwapBuffers", (void**)&_r_eglSwapBuffers },
+    { "eglSwapInterval", (void**)&_r_eglSwapInterval },
+    { "eglTerminate", (void**)&_r_eglTerminate },
+    { "eglWaitClient", (void**)&_r_eglWaitClient },
+    { "eglWaitGL", (void**)&_r_eglWaitGL },
+    { "eglWaitNative", (void**)&_r_eglWaitNative },
+    { "eglWaitSync", (void**)&_r_eglWaitSync },
+    { "eglWaitSyncKHR", (void**)&_r_eglWaitSyncKHR },
+    { "egl_cobj_surface_format_create", (void**)&_r_egl_cobj_surface_format_create },
+    { "egl_color_buffer_flush_mapping_to_cpu", (void**)&_r_egl_color_buffer_flush_mapping_to_cpu },
+    { "egl_color_buffer_flush_mapping_to_gpu", (void**)&_r_egl_color_buffer_flush_mapping_to_gpu },
+    { "egl_color_buffer_get_age", (void**)&_r_egl_color_buffer_get_age },
+    { "egl_color_buffer_get_block_stride", (void**)&_r_egl_color_buffer_get_block_stride },
+    { "egl_color_buffer_get_cached_bo", (void**)&_r_egl_color_buffer_get_cached_bo },
+    { "egl_color_buffer_get_early_display", (void**)&_r_egl_color_buffer_get_early_display },
+    { "egl_color_buffer_get_fence", (void**)&_r_egl_color_buffer_get_fence },
+    { "egl_color_buffer_get_format", (void**)&_r_egl_color_buffer_get_format },
+    { "egl_color_buffer_get_height", (void**)&_r_egl_color_buffer_get_height },
+    { "egl_color_buffer_get_mapped_address", (void**)&_r_egl_color_buffer_get_mapped_address },
+    { "egl_color_buffer_get_non_thread_safe", (void**)&_r_egl_color_buffer_get_non_thread_safe },
+    { "egl_color_buffer_get_num_planes", (void**)&_r_egl_color_buffer_get_num_planes },
+    { "egl_color_buffer_get_plane_dims", (void**)&_r_egl_color_buffer_get_plane_dims },
+    { "egl_color_buffer_get_private_buffer_info", (void**)&_r_egl_color_buffer_get_private_buffer_info },
+    { "egl_color_buffer_get_private_data", (void**)&_r_egl_color_buffer_get_private_data },
+    { "egl_color_buffer_get_rotation", (void**)&_r_egl_color_buffer_get_rotation },
+    { "egl_color_buffer_get_width", (void**)&_r_egl_color_buffer_get_width },
+    { "egl_color_buffer_get_y_inversion", (void**)&_r_egl_color_buffer_get_y_inversion },
+    { "egl_color_buffer_get_yuva_comp_sizes", (void**)&_r_egl_color_buffer_get_yuva_comp_sizes },
+    { "egl_color_buffer_group_create", (void**)&_r_egl_color_buffer_group_create },
+    { "egl_color_buffer_group_free", (void**)&_r_egl_color_buffer_group_free },
+    { "egl_color_buffer_group_get_layer", (void**)&_r_egl_color_buffer_group_get_layer },
+    { "egl_color_buffer_group_get_num_layers", (void**)&_r_egl_color_buffer_group_get_num_layers },
+    { "egl_color_buffer_group_set_layer", (void**)&_r_egl_color_buffer_group_set_layer },
+    { "egl_color_buffer_increment_age", (void**)&_r_egl_color_buffer_increment_age },
+    { "egl_color_buffer_is_protected", (void**)&_r_egl_color_buffer_is_protected },
+    { "egl_color_buffer_map", (void**)&_r_egl_color_buffer_map },
+    { "egl_color_buffer_new", (void**)&_r_egl_color_buffer_new },
+    { "egl_color_buffer_release", (void**)&_r_egl_color_buffer_release },
+    { "egl_color_buffer_retain", (void**)&_r_egl_color_buffer_retain },
+    { "egl_color_buffer_rgb_format_get_bpp", (void**)&_r_egl_color_buffer_rgb_format_get_bpp },
+    { "egl_color_buffer_set_age", (void**)&_r_egl_color_buffer_set_age },
+    { "egl_color_buffer_set_cached_bo", (void**)&_r_egl_color_buffer_set_cached_bo },
+    { "egl_color_buffer_set_early_display", (void**)&_r_egl_color_buffer_set_early_display },
+    { "egl_color_buffer_set_fence", (void**)&_r_egl_color_buffer_set_fence },
+    { "egl_color_buffer_set_non_thread_safe", (void**)&_r_egl_color_buffer_set_non_thread_safe },
+    { "egl_color_buffer_set_private_buffer_info", (void**)&_r_egl_color_buffer_set_private_buffer_info },
+    { "egl_color_buffer_set_private_data", (void**)&_r_egl_color_buffer_set_private_data },
+    { "egl_color_buffer_set_rotation", (void**)&_r_egl_color_buffer_set_rotation },
+    { "egl_color_buffer_set_transform", (void**)&_r_egl_color_buffer_set_transform },
+    { "egl_color_buffer_unmap", (void**)&_r_egl_color_buffer_unmap },
+    { "egl_color_buffer_wrap_external", (void**)&_r_egl_color_buffer_wrap_external },
+    { "egl_color_buffer_wrap_external_planar", (void**)&_r_egl_color_buffer_wrap_external_planar },
+    { "egl_display_release", (void**)&_r_egl_display_release },
+    { "egl_env_set", (void**)&_r_egl_env_set },
+    { "egl_get_winsys_display", (void**)&_r_egl_get_winsys_display },
+    { "egl_get_winsys_surface", (void**)&_r_egl_get_winsys_surface },
+    { "egl_register_gles_blob_cache_callbacks", (void**)&_r_egl_register_gles_blob_cache_callbacks },
+    { "egl_surface_release", (void**)&_r_egl_surface_release },
+    { "egl_winsys_get_implementation", (void**)&_r_egl_winsys_get_implementation },
+    { "egl_winsys_get_implementation_gbm", (void**)&_r_egl_winsys_get_implementation_gbm },
+    { "eglp_call_get_winsys_format_from_eglp_config", (void**)&_r_eglp_call_get_winsys_format_from_eglp_config },
+    { "eglp_check_attribute_present", (void**)&_r_eglp_check_attribute_present },
+    { "eglp_config_set_attributes", (void**)&_r_eglp_config_set_attributes },
+    { "eglp_display_create_default_configs", (void**)&_r_eglp_display_create_default_configs },
+    { "eglp_find_unterminated_state", (void**)&_r_eglp_find_unterminated_state },
+    { "eglp_get_attribute_value", (void**)&_r_eglp_get_attribute_value },
+    { "eglp_has_display_terminated", (void**)&_r_eglp_has_display_terminated },
+    { "eglp_read_write_buffer", (void**)&_r_eglp_read_write_buffer },
+    { "eglp_wait_buffer_displayed", (void**)&_r_eglp_wait_buffer_displayed }
+        };
+        for (unsigned i = 0; i < sizeof(tc)/sizeof(tc[0]); i++)
+            *tc[i].p = dlsym(mali, tc[i].n);
+    }
+    return mali;
+}
+__attribute__((constructor(101))) static void eglfix_autoload(void) { ensure(); }
+static void *fixed_create(void *dpy, void *cfg, void *share, const int *attribs) {
+    if (!ensure()) return 0;
+    void *c = 0;
+    if (attribs) {
+        int cl[64]; int j = 0;
+        for (int i = 0; attribs[i] && i < 60; i += 2) {
+            if (attribs[i] == 0x3098) continue;
+            cl[j++] = attribs[i]; cl[j++] = attribs[i+1];
+        }
+        cl[j++] = 0;
+        c = r_create(dpy, cfg, share, cl);
+        if (c) return c;
+    }
+    int none = 0;
+    c = r_create(dpy, cfg, share, &none);
+    if (c) return c;
+    return r_create(dpy, cfg, share, 0);
+}
+static int (*r_initialize)(void*, int*, int*);
+static int (*r_chooseconfig)(void*, const int*, void**, int, int*);
+static int (*r_bindapi)(unsigned);
+
+void *eglGetDisplay(void *native) {
+    if (!ensure()) return 0;
+    if (!r_initialize) {
+        r_initialize   = dlsym(mali, "eglInitialize");
+        r_chooseconfig = dlsym(mali, "eglChooseConfig");
+        r_bindapi      = dlsym(mali, "eglBindAPI");
+    }
+    void *d = r_getdisplay(native);
+    int maj = 0, mn = 0;
+    if (d && r_initialize(d, &maj, &mn)) return d;
+    /* default/X11 等 native display 在这个 blob 上初始化必败 →
+     * 兜底: mali 自家 gbm 设备 (renderD128) */
+    if (!gbm_real_display && gbm_create_device) {
+        int fd = open("/dev/dri/renderD128", O_RDWR | O_CLOEXEC);
+        if (fd >= 0) {
+            gbm_dev = gbm_create_device(fd);
+            if (gbm_dev) gbm_real_display = r_getdisplay(gbm_dev);
+        }
+    }
+    return gbm_real_display ? gbm_real_display : d;
+}
+void *eglGetProcAddress(const char *name) {
+    if (!ensure()) return 0;
+    if (strcmp(name, "eglCreateContext") == 0) return (void*)fixed_create;
+    return r_gpa(name);
+}
+void *eglCreateContext(void *dpy, void *cfg, void *share, const int *attribs) {
+    return fixed_create(dpy, cfg, share, attribs);
+}
+__asm__(
+".bss\n.align 8\n.globl _r_eglBindAPI\n.hidden _r_eglBindAPI\n.type _r_eglBindAPI,%object\n.size _r_eglBindAPI,8\n_r_eglBindAPI:\n.zero 8\n.globl _r_eglBindTexImage\n.hidden _r_eglBindTexImage\n.type _r_eglBindTexImage,%object\n.size _r_eglBindTexImage,8\n_r_eglBindTexImage:\n.zero 8\n.globl _r_eglChooseConfig\n.hidden _r_eglChooseConfig\n.type _r_eglChooseConfig,%object\n.size _r_eglChooseConfig,8\n_r_eglChooseConfig:\n.zero 8\n.globl _r_eglClientWaitSync\n.hidden _r_eglClientWaitSync\n.type _r_eglClientWaitSync,%object\n.size _r_eglClientWaitSync,8\n_r_eglClientWaitSync:\n.zero 8\n.globl _r_eglClientWaitSyncKHR\n.hidden _r_eglClientWaitSyncKHR\n.type _r_eglClientWaitSyncKHR,%object\n.size _r_eglClientWaitSyncKHR,8\n_r_eglClientWaitSyncKHR:\n.zero 8\n.globl _r_eglCopyBuffers\n.hidden _r_eglCopyBuffers\n.type _r_eglCopyBuffers,%object\n.size _r_eglCopyBuffers,8\n_r_eglCopyBuffers:\n.zero 8\n.globl _r_eglCreateImage\n.hidden _r_eglCreateImage\n.type _r_eglCreateImage,%object\n.size _r_eglCreateImage,8\n_r_eglCreateImage:\n.zero 8\n.globl _r_eglCreateImageKHR\n.hidden _r_eglCreateImageKHR\n.type _r_eglCreateImageKHR,%object\n.size _r_eglCreateImageKHR,8\n_r_eglCreateImageKHR:\n.zero 8\n.globl _r_eglCreatePbufferFromClientBuffer\n.hidden _r_eglCreatePbufferFromClientBuffer\n.type _r_eglCreatePbufferFromClientBuffer,%object\n.size _r_eglCreatePbufferFromClientBuffer,8\n_r_eglCreatePbufferFromClientBuffer:\n.zero 8\n.globl _r_eglCreatePbufferSurface\n.hidden _r_eglCreatePbufferSurface\n.type _r_eglCreatePbufferSurface,%object\n.size _r_eglCreatePbufferSurface,8\n_r_eglCreatePbufferSurface:\n.zero 8\n.globl _r_eglCreatePixmapSurface\n.hidden _r_eglCreatePixmapSurface\n.type _r_eglCreatePixmapSurface,%object\n.size _r_eglCreatePixmapSurface,8\n_r_eglCreatePixmapSurface:\n.zero 8\n.globl _r_eglCreatePlatformPixmapSurface\n.hidden _r_eglCreatePlatformPixmapSurface\n.type _r_eglCreatePlatformPixmapSurface,%object\n.size _r_eglCreatePlatformPixmapSurface,8\n_r_eglCreatePlatformPixmapSurface:\n.zero 8\n.globl _r_eglCreatePlatformWindowSurface\n.hidden _r_eglCreatePlatformWindowSurface\n.type _r_eglCreatePlatformWindowSurface,%object\n.size _r_eglCreatePlatformWindowSurface,8\n_r_eglCreatePlatformWindowSurface:\n.zero 8\n.globl _r_eglCreateSync\n.hidden _r_eglCreateSync\n.type _r_eglCreateSync,%object\n.size _r_eglCreateSync,8\n_r_eglCreateSync:\n.zero 8\n.globl _r_eglCreateSyncImpl\n.hidden _r_eglCreateSyncImpl\n.type _r_eglCreateSyncImpl,%object\n.size _r_eglCreateSyncImpl,8\n_r_eglCreateSyncImpl:\n.zero 8\n.globl _r_eglCreateSyncKHR\n.hidden _r_eglCreateSyncKHR\n.type _r_eglCreateSyncKHR,%object\n.size _r_eglCreateSyncKHR,8\n_r_eglCreateSyncKHR:\n.zero 8\n.globl _r_eglCreateWindowSurface\n.hidden _r_eglCreateWindowSurface\n.type _r_eglCreateWindowSurface,%object\n.size _r_eglCreateWindowSurface,8\n_r_eglCreateWindowSurface:\n.zero 8\n.globl _r_eglDestroyContext\n.hidden _r_eglDestroyContext\n.type _r_eglDestroyContext,%object\n.size _r_eglDestroyContext,8\n_r_eglDestroyContext:\n.zero 8\n.globl _r_eglDestroyImage\n.hidden _r_eglDestroyImage\n.type _r_eglDestroyImage,%object\n.size _r_eglDestroyImage,8\n_r_eglDestroyImage:\n.zero 8\n.globl _r_eglDestroyImageKHR\n.hidden _r_eglDestroyImageKHR\n.type _r_eglDestroyImageKHR,%object\n.size _r_eglDestroyImageKHR,8\n_r_eglDestroyImageKHR:\n.zero 8\n.globl _r_eglDestroySurface\n.hidden _r_eglDestroySurface\n.type _r_eglDestroySurface,%object\n.size _r_eglDestroySurface,8\n_r_eglDestroySurface:\n.zero 8\n.globl _r_eglDestroySync\n.hidden _r_eglDestroySync\n.type _r_eglDestroySync,%object\n.size _r_eglDestroySync,8\n_r_eglDestroySync:\n.zero 8\n.globl _r_eglDestroySyncKHR\n.hidden _r_eglDestroySyncKHR\n.type _r_eglDestroySyncKHR,%object\n.size _r_eglDestroySyncKHR,8\n_r_eglDestroySyncKHR:\n.zero 8\n.globl _r_eglExportDMABUFImageMESA\n.hidden _r_eglExportDMABUFImageMESA\n.type _r_eglExportDMABUFImageMESA,%object\n.size _r_eglExportDMABUFImageMESA,8\n_r_eglExportDMABUFImageMESA:\n.zero 8\n.globl _r_eglExportDMABUFImageQueryMESA\n.hidden _r_eglExportDMABUFImageQueryMESA\n.type _r_eglExportDMABUFImageQueryMESA,%object\n.size _r_eglExportDMABUFImageQueryMESA,8\n_r_eglExportDMABUFImageQueryMESA:\n.zero 8\n.globl _r_eglGetConfigAttrib\n.hidden _r_eglGetConfigAttrib\n.type _r_eglGetConfigAttrib,%object\n.size _r_eglGetConfigAttrib,8\n_r_eglGetConfigAttrib:\n.zero 8\n.globl _r_eglGetConfigs\n.hidden _r_eglGetConfigs\n.type _r_eglGetConfigs,%object\n.size _r_eglGetConfigs,8\n_r_eglGetConfigs:\n.zero 8\n.globl _r_eglGetCurrentContext\n.hidden _r_eglGetCurrentContext\n.type _r_eglGetCurrentContext,%object\n.size _r_eglGetCurrentContext,8\n_r_eglGetCurrentContext:\n.zero 8\n.globl _r_eglGetCurrentDisplay\n.hidden _r_eglGetCurrentDisplay\n.type _r_eglGetCurrentDisplay,%object\n.size _r_eglGetCurrentDisplay,8\n_r_eglGetCurrentDisplay:\n.zero 8\n.globl _r_eglGetCurrentSurface\n.hidden _r_eglGetCurrentSurface\n.type _r_eglGetCurrentSurface,%object\n.size _r_eglGetCurrentSurface,8\n_r_eglGetCurrentSurface:\n.zero 8\n.globl _r_eglGetError\n.hidden _r_eglGetError\n.type _r_eglGetError,%object\n.size _r_eglGetError,8\n_r_eglGetError:\n.zero 8\n.globl _r_eglGetPlatformDisplay\n.hidden _r_eglGetPlatformDisplay\n.type _r_eglGetPlatformDisplay,%object\n.size _r_eglGetPlatformDisplay,8\n_r_eglGetPlatformDisplay:\n.zero 8\n.globl _r_eglGetSyncAttrib\n.hidden _r_eglGetSyncAttrib\n.type _r_eglGetSyncAttrib,%object\n.size _r_eglGetSyncAttrib,8\n_r_eglGetSyncAttrib:\n.zero 8\n.globl _r_eglGetSyncAttribKHR\n.hidden _r_eglGetSyncAttribKHR\n.type _r_eglGetSyncAttribKHR,%object\n.size _r_eglGetSyncAttribKHR,8\n_r_eglGetSyncAttribKHR:\n.zero 8\n.globl _r_eglInitialize\n.hidden _r_eglInitialize\n.type _r_eglInitialize,%object\n.size _r_eglInitialize,8\n_r_eglInitialize:\n.zero 8\n.globl _r_eglMakeCurrent\n.hidden _r_eglMakeCurrent\n.type _r_eglMakeCurrent,%object\n.size _r_eglMakeCurrent,8\n_r_eglMakeCurrent:\n.zero 8\n.globl _r_eglQueryAPI\n.hidden _r_eglQueryAPI\n.type _r_eglQueryAPI,%object\n.size _r_eglQueryAPI,8\n_r_eglQueryAPI:\n.zero 8\n.globl _r_eglQueryContext\n.hidden _r_eglQueryContext\n.type _r_eglQueryContext,%object\n.size _r_eglQueryContext,8\n_r_eglQueryContext:\n.zero 8\n.globl _r_eglQueryDmaBufFormatsEXT\n.hidden _r_eglQueryDmaBufFormatsEXT\n.type _r_eglQueryDmaBufFormatsEXT,%object\n.size _r_eglQueryDmaBufFormatsEXT,8\n_r_eglQueryDmaBufFormatsEXT:\n.zero 8\n.globl _r_eglQueryDmaBufModifiersEXT\n.hidden _r_eglQueryDmaBufModifiersEXT\n.type _r_eglQueryDmaBufModifiersEXT,%object\n.size _r_eglQueryDmaBufModifiersEXT,8\n_r_eglQueryDmaBufModifiersEXT:\n.zero 8\n.globl _r_eglQueryString\n.hidden _r_eglQueryString\n.type _r_eglQueryString,%object\n.size _r_eglQueryString,8\n_r_eglQueryString:\n.zero 8\n.globl _r_eglQuerySurface\n.hidden _r_eglQuerySurface\n.type _r_eglQuerySurface,%object\n.size _r_eglQuerySurface,8\n_r_eglQuerySurface:\n.zero 8\n.globl _r_eglReleaseTexImage\n.hidden _r_eglReleaseTexImage\n.type _r_eglReleaseTexImage,%object\n.size _r_eglReleaseTexImage,8\n_r_eglReleaseTexImage:\n.zero 8\n.globl _r_eglReleaseThread\n.hidden _r_eglReleaseThread\n.type _r_eglReleaseThread,%object\n.size _r_eglReleaseThread,8\n_r_eglReleaseThread:\n.zero 8\n.globl _r_eglSetDamageRegionKHR\n.hidden _r_eglSetDamageRegionKHR\n.type _r_eglSetDamageRegionKHR,%object\n.size _r_eglSetDamageRegionKHR,8\n_r_eglSetDamageRegionKHR:\n.zero 8\n.globl _r_eglSurfaceAttrib\n.hidden _r_eglSurfaceAttrib\n.type _r_eglSurfaceAttrib,%object\n.size _r_eglSurfaceAttrib,8\n_r_eglSurfaceAttrib:\n.zero 8\n.globl _r_eglSwapBuffers\n.hidden _r_eglSwapBuffers\n.type _r_eglSwapBuffers,%object\n.size _r_eglSwapBuffers,8\n_r_eglSwapBuffers:\n.zero 8\n.globl _r_eglSwapInterval\n.hidden _r_eglSwapInterval\n.type _r_eglSwapInterval,%object\n.size _r_eglSwapInterval,8\n_r_eglSwapInterval:\n.zero 8\n.globl _r_eglTerminate\n.hidden _r_eglTerminate\n.type _r_eglTerminate,%object\n.size _r_eglTerminate,8\n_r_eglTerminate:\n.zero 8\n.globl _r_eglWaitClient\n.hidden _r_eglWaitClient\n.type _r_eglWaitClient,%object\n.size _r_eglWaitClient,8\n_r_eglWaitClient:\n.zero 8\n.globl _r_eglWaitGL\n.hidden _r_eglWaitGL\n.type _r_eglWaitGL,%object\n.size _r_eglWaitGL,8\n_r_eglWaitGL:\n.zero 8\n.globl _r_eglWaitNative\n.hidden _r_eglWaitNative\n.type _r_eglWaitNative,%object\n.size _r_eglWaitNative,8\n_r_eglWaitNative:\n.zero 8\n.globl _r_eglWaitSync\n.hidden _r_eglWaitSync\n.type _r_eglWaitSync,%object\n.size _r_eglWaitSync,8\n_r_eglWaitSync:\n.zero 8\n.globl _r_eglWaitSyncKHR\n.hidden _r_eglWaitSyncKHR\n.type _r_eglWaitSyncKHR,%object\n.size _r_eglWaitSyncKHR,8\n_r_eglWaitSyncKHR:\n.zero 8\n.globl _r_egl_cobj_surface_format_create\n.hidden _r_egl_cobj_surface_format_create\n.type _r_egl_cobj_surface_format_create,%object\n.size _r_egl_cobj_surface_format_create,8\n_r_egl_cobj_surface_format_create:\n.zero 8\n.globl _r_egl_color_buffer_flush_mapping_to_cpu\n.hidden _r_egl_color_buffer_flush_mapping_to_cpu\n.type _r_egl_color_buffer_flush_mapping_to_cpu,%object\n.size _r_egl_color_buffer_flush_mapping_to_cpu,8\n_r_egl_color_buffer_flush_mapping_to_cpu:\n.zero 8\n.globl _r_egl_color_buffer_flush_mapping_to_gpu\n.hidden _r_egl_color_buffer_flush_mapping_to_gpu\n.type _r_egl_color_buffer_flush_mapping_to_gpu,%object\n.size _r_egl_color_buffer_flush_mapping_to_gpu,8\n_r_egl_color_buffer_flush_mapping_to_gpu:\n.zero 8\n.globl _r_egl_color_buffer_get_age\n.hidden _r_egl_color_buffer_get_age\n.type _r_egl_color_buffer_get_age,%object\n.size _r_egl_color_buffer_get_age,8\n_r_egl_color_buffer_get_age:\n.zero 8\n.globl _r_egl_color_buffer_get_block_stride\n.hidden _r_egl_color_buffer_get_block_stride\n.type _r_egl_color_buffer_get_block_stride,%object\n.size _r_egl_color_buffer_get_block_stride,8\n_r_egl_color_buffer_get_block_stride:\n.zero 8\n.globl _r_egl_color_buffer_get_cached_bo\n.hidden _r_egl_color_buffer_get_cached_bo\n.type _r_egl_color_buffer_get_cached_bo,%object\n.size _r_egl_color_buffer_get_cached_bo,8\n_r_egl_color_buffer_get_cached_bo:\n.zero 8\n.globl _r_egl_color_buffer_get_early_display\n.hidden _r_egl_color_buffer_get_early_display\n.type _r_egl_color_buffer_get_early_display,%object\n.size _r_egl_color_buffer_get_early_display,8\n_r_egl_color_buffer_get_early_display:\n.zero 8\n.globl _r_egl_color_buffer_get_fence\n.hidden _r_egl_color_buffer_get_fence\n.type _r_egl_color_buffer_get_fence,%object\n.size _r_egl_color_buffer_get_fence,8\n_r_egl_color_buffer_get_fence:\n.zero 8\n.globl _r_egl_color_buffer_get_format\n.hidden _r_egl_color_buffer_get_format\n.type _r_egl_color_buffer_get_format,%object\n.size _r_egl_color_buffer_get_format,8\n_r_egl_color_buffer_get_format:\n.zero 8\n.globl _r_egl_color_buffer_get_height\n.hidden _r_egl_color_buffer_get_height\n.type _r_egl_color_buffer_get_height,%object\n.size _r_egl_color_buffer_get_height,8\n_r_egl_color_buffer_get_height:\n.zero 8\n.globl _r_egl_color_buffer_get_mapped_address\n.hidden _r_egl_color_buffer_get_mapped_address\n.type _r_egl_color_buffer_get_mapped_address,%object\n.size _r_egl_color_buffer_get_mapped_address,8\n_r_egl_color_buffer_get_mapped_address:\n.zero 8\n.globl _r_egl_color_buffer_get_non_thread_safe\n.hidden _r_egl_color_buffer_get_non_thread_safe\n.type _r_egl_color_buffer_get_non_thread_safe,%object\n.size _r_egl_color_buffer_get_non_thread_safe,8\n_r_egl_color_buffer_get_non_thread_safe:\n.zero 8\n.globl _r_egl_color_buffer_get_num_planes\n.hidden _r_egl_color_buffer_get_num_planes\n.type _r_egl_color_buffer_get_num_planes,%object\n.size _r_egl_color_buffer_get_num_planes,8\n_r_egl_color_buffer_get_num_planes:\n.zero 8\n.globl _r_egl_color_buffer_get_plane_dims\n.hidden _r_egl_color_buffer_get_plane_dims\n.type _r_egl_color_buffer_get_plane_dims,%object\n.size _r_egl_color_buffer_get_plane_dims,8\n_r_egl_color_buffer_get_plane_dims:\n.zero 8\n.globl _r_egl_color_buffer_get_private_buffer_info\n.hidden _r_egl_color_buffer_get_private_buffer_info\n.type _r_egl_color_buffer_get_private_buffer_info,%object\n.size _r_egl_color_buffer_get_private_buffer_info,8\n_r_egl_color_buffer_get_private_buffer_info:\n.zero 8\n.globl _r_egl_color_buffer_get_private_data\n.hidden _r_egl_color_buffer_get_private_data\n.type _r_egl_color_buffer_get_private_data,%object\n.size _r_egl_color_buffer_get_private_data,8\n_r_egl_color_buffer_get_private_data:\n.zero 8\n.globl _r_egl_color_buffer_get_rotation\n.hidden _r_egl_color_buffer_get_rotation\n.type _r_egl_color_buffer_get_rotation,%object\n.size _r_egl_color_buffer_get_rotation,8\n_r_egl_color_buffer_get_rotation:\n.zero 8\n.globl _r_egl_color_buffer_get_width\n.hidden _r_egl_color_buffer_get_width\n.type _r_egl_color_buffer_get_width,%object\n.size _r_egl_color_buffer_get_width,8\n_r_egl_color_buffer_get_width:\n.zero 8\n.globl _r_egl_color_buffer_get_y_inversion\n.hidden _r_egl_color_buffer_get_y_inversion\n.type _r_egl_color_buffer_get_y_inversion,%object\n.size _r_egl_color_buffer_get_y_inversion,8\n_r_egl_color_buffer_get_y_inversion:\n.zero 8\n.globl _r_egl_color_buffer_get_yuva_comp_sizes\n.hidden _r_egl_color_buffer_get_yuva_comp_sizes\n.type _r_egl_color_buffer_get_yuva_comp_sizes,%object\n.size _r_egl_color_buffer_get_yuva_comp_sizes,8\n_r_egl_color_buffer_get_yuva_comp_sizes:\n.zero 8\n.globl _r_egl_color_buffer_group_create\n.hidden _r_egl_color_buffer_group_create\n.type _r_egl_color_buffer_group_create,%object\n.size _r_egl_color_buffer_group_create,8\n_r_egl_color_buffer_group_create:\n.zero 8\n.globl _r_egl_color_buffer_group_free\n.hidden _r_egl_color_buffer_group_free\n.type _r_egl_color_buffer_group_free,%object\n.size _r_egl_color_buffer_group_free,8\n_r_egl_color_buffer_group_free:\n.zero 8\n.globl _r_egl_color_buffer_group_get_layer\n.hidden _r_egl_color_buffer_group_get_layer\n.type _r_egl_color_buffer_group_get_layer,%object\n.size _r_egl_color_buffer_group_get_layer,8\n_r_egl_color_buffer_group_get_layer:\n.zero 8\n.globl _r_egl_color_buffer_group_get_num_layers\n.hidden _r_egl_color_buffer_group_get_num_layers\n.type _r_egl_color_buffer_group_get_num_layers,%object\n.size _r_egl_color_buffer_group_get_num_layers,8\n_r_egl_color_buffer_group_get_num_layers:\n.zero 8\n.globl _r_egl_color_buffer_group_set_layer\n.hidden _r_egl_color_buffer_group_set_layer\n.type _r_egl_color_buffer_group_set_layer,%object\n.size _r_egl_color_buffer_group_set_layer,8\n_r_egl_color_buffer_group_set_layer:\n.zero 8\n.globl _r_egl_color_buffer_increment_age\n.hidden _r_egl_color_buffer_increment_age\n.type _r_egl_color_buffer_increment_age,%object\n.size _r_egl_color_buffer_increment_age,8\n_r_egl_color_buffer_increment_age:\n.zero 8\n.globl _r_egl_color_buffer_is_protected\n.hidden _r_egl_color_buffer_is_protected\n.type _r_egl_color_buffer_is_protected,%object\n.size _r_egl_color_buffer_is_protected,8\n_r_egl_color_buffer_is_protected:\n.zero 8\n.globl _r_egl_color_buffer_map\n.hidden _r_egl_color_buffer_map\n.type _r_egl_color_buffer_map,%object\n.size _r_egl_color_buffer_map,8\n_r_egl_color_buffer_map:\n.zero 8\n.globl _r_egl_color_buffer_new\n.hidden _r_egl_color_buffer_new\n.type _r_egl_color_buffer_new,%object\n.size _r_egl_color_buffer_new,8\n_r_egl_color_buffer_new:\n.zero 8\n.globl _r_egl_color_buffer_release\n.hidden _r_egl_color_buffer_release\n.type _r_egl_color_buffer_release,%object\n.size _r_egl_color_buffer_release,8\n_r_egl_color_buffer_release:\n.zero 8\n.globl _r_egl_color_buffer_retain\n.hidden _r_egl_color_buffer_retain\n.type _r_egl_color_buffer_retain,%object\n.size _r_egl_color_buffer_retain,8\n_r_egl_color_buffer_retain:\n.zero 8\n.globl _r_egl_color_buffer_rgb_format_get_bpp\n.hidden _r_egl_color_buffer_rgb_format_get_bpp\n.type _r_egl_color_buffer_rgb_format_get_bpp,%object\n.size _r_egl_color_buffer_rgb_format_get_bpp,8\n_r_egl_color_buffer_rgb_format_get_bpp:\n.zero 8\n.globl _r_egl_color_buffer_set_age\n.hidden _r_egl_color_buffer_set_age\n.type _r_egl_color_buffer_set_age,%object\n.size _r_egl_color_buffer_set_age,8\n_r_egl_color_buffer_set_age:\n.zero 8\n.globl _r_egl_color_buffer_set_cached_bo\n.hidden _r_egl_color_buffer_set_cached_bo\n.type _r_egl_color_buffer_set_cached_bo,%object\n.size _r_egl_color_buffer_set_cached_bo,8\n_r_egl_color_buffer_set_cached_bo:\n.zero 8\n.globl _r_egl_color_buffer_set_early_display\n.hidden _r_egl_color_buffer_set_early_display\n.type _r_egl_color_buffer_set_early_display,%object\n.size _r_egl_color_buffer_set_early_display,8\n_r_egl_color_buffer_set_early_display:\n.zero 8\n.globl _r_egl_color_buffer_set_fence\n.hidden _r_egl_color_buffer_set_fence\n.type _r_egl_color_buffer_set_fence,%object\n.size _r_egl_color_buffer_set_fence,8\n_r_egl_color_buffer_set_fence:\n.zero 8\n.globl _r_egl_color_buffer_set_non_thread_safe\n.hidden _r_egl_color_buffer_set_non_thread_safe\n.type _r_egl_color_buffer_set_non_thread_safe,%object\n.size _r_egl_color_buffer_set_non_thread_safe,8\n_r_egl_color_buffer_set_non_thread_safe:\n.zero 8\n.globl _r_egl_color_buffer_set_private_buffer_info\n.hidden _r_egl_color_buffer_set_private_buffer_info\n.type _r_egl_color_buffer_set_private_buffer_info,%object\n.size _r_egl_color_buffer_set_private_buffer_info,8\n_r_egl_color_buffer_set_private_buffer_info:\n.zero 8\n.globl _r_egl_color_buffer_set_private_data\n.hidden _r_egl_color_buffer_set_private_data\n.type _r_egl_color_buffer_set_private_data,%object\n.size _r_egl_color_buffer_set_private_data,8\n_r_egl_color_buffer_set_private_data:\n.zero 8\n.globl _r_egl_color_buffer_set_rotation\n.hidden _r_egl_color_buffer_set_rotation\n.type _r_egl_color_buffer_set_rotation,%object\n.size _r_egl_color_buffer_set_rotation,8\n_r_egl_color_buffer_set_rotation:\n.zero 8\n.globl _r_egl_color_buffer_set_transform\n.hidden _r_egl_color_buffer_set_transform\n.type _r_egl_color_buffer_set_transform,%object\n.size _r_egl_color_buffer_set_transform,8\n_r_egl_color_buffer_set_transform:\n.zero 8\n.globl _r_egl_color_buffer_unmap\n.hidden _r_egl_color_buffer_unmap\n.type _r_egl_color_buffer_unmap,%object\n.size _r_egl_color_buffer_unmap,8\n_r_egl_color_buffer_unmap:\n.zero 8\n.globl _r_egl_color_buffer_wrap_external\n.hidden _r_egl_color_buffer_wrap_external\n.type _r_egl_color_buffer_wrap_external,%object\n.size _r_egl_color_buffer_wrap_external,8\n_r_egl_color_buffer_wrap_external:\n.zero 8\n.globl _r_egl_color_buffer_wrap_external_planar\n.hidden _r_egl_color_buffer_wrap_external_planar\n.type _r_egl_color_buffer_wrap_external_planar,%object\n.size _r_egl_color_buffer_wrap_external_planar,8\n_r_egl_color_buffer_wrap_external_planar:\n.zero 8\n.globl _r_egl_display_release\n.hidden _r_egl_display_release\n.type _r_egl_display_release,%object\n.size _r_egl_display_release,8\n_r_egl_display_release:\n.zero 8\n.globl _r_egl_env_set\n.hidden _r_egl_env_set\n.type _r_egl_env_set,%object\n.size _r_egl_env_set,8\n_r_egl_env_set:\n.zero 8\n.globl _r_egl_get_winsys_display\n.hidden _r_egl_get_winsys_display\n.type _r_egl_get_winsys_display,%object\n.size _r_egl_get_winsys_display,8\n_r_egl_get_winsys_display:\n.zero 8\n.globl _r_egl_get_winsys_surface\n.hidden _r_egl_get_winsys_surface\n.type _r_egl_get_winsys_surface,%object\n.size _r_egl_get_winsys_surface,8\n_r_egl_get_winsys_surface:\n.zero 8\n.globl _r_egl_register_gles_blob_cache_callbacks\n.hidden _r_egl_register_gles_blob_cache_callbacks\n.type _r_egl_register_gles_blob_cache_callbacks,%object\n.size _r_egl_register_gles_blob_cache_callbacks,8\n_r_egl_register_gles_blob_cache_callbacks:\n.zero 8\n.globl _r_egl_surface_release\n.hidden _r_egl_surface_release\n.type _r_egl_surface_release,%object\n.size _r_egl_surface_release,8\n_r_egl_surface_release:\n.zero 8\n.globl _r_egl_winsys_get_implementation\n.hidden _r_egl_winsys_get_implementation\n.type _r_egl_winsys_get_implementation,%object\n.size _r_egl_winsys_get_implementation,8\n_r_egl_winsys_get_implementation:\n.zero 8\n.globl _r_egl_winsys_get_implementation_gbm\n.hidden _r_egl_winsys_get_implementation_gbm\n.type _r_egl_winsys_get_implementation_gbm,%object\n.size _r_egl_winsys_get_implementation_gbm,8\n_r_egl_winsys_get_implementation_gbm:\n.zero 8\n.globl _r_eglp_call_get_winsys_format_from_eglp_config\n.hidden _r_eglp_call_get_winsys_format_from_eglp_config\n.type _r_eglp_call_get_winsys_format_from_eglp_config,%object\n.size _r_eglp_call_get_winsys_format_from_eglp_config,8\n_r_eglp_call_get_winsys_format_from_eglp_config:\n.zero 8\n.globl _r_eglp_check_attribute_present\n.hidden _r_eglp_check_attribute_present\n.type _r_eglp_check_attribute_present,%object\n.size _r_eglp_check_attribute_present,8\n_r_eglp_check_attribute_present:\n.zero 8\n.globl _r_eglp_config_set_attributes\n.hidden _r_eglp_config_set_attributes\n.type _r_eglp_config_set_attributes,%object\n.size _r_eglp_config_set_attributes,8\n_r_eglp_config_set_attributes:\n.zero 8\n.globl _r_eglp_display_create_default_configs\n.hidden _r_eglp_display_create_default_configs\n.type _r_eglp_display_create_default_configs,%object\n.size _r_eglp_display_create_default_configs,8\n_r_eglp_display_create_default_configs:\n.zero 8\n.globl _r_eglp_find_unterminated_state\n.hidden _r_eglp_find_unterminated_state\n.type _r_eglp_find_unterminated_state,%object\n.size _r_eglp_find_unterminated_state,8\n_r_eglp_find_unterminated_state:\n.zero 8\n.globl _r_eglp_get_attribute_value\n.hidden _r_eglp_get_attribute_value\n.type _r_eglp_get_attribute_value,%object\n.size _r_eglp_get_attribute_value,8\n_r_eglp_get_attribute_value:\n.zero 8\n.globl _r_eglp_has_display_terminated\n.hidden _r_eglp_has_display_terminated\n.type _r_eglp_has_display_terminated,%object\n.size _r_eglp_has_display_terminated,8\n_r_eglp_has_display_terminated:\n.zero 8\n.globl _r_eglp_read_write_buffer\n.hidden _r_eglp_read_write_buffer\n.type _r_eglp_read_write_buffer,%object\n.size _r_eglp_read_write_buffer,8\n_r_eglp_read_write_buffer:\n.zero 8\n.globl _r_eglp_wait_buffer_displayed\n.hidden _r_eglp_wait_buffer_displayed\n.type _r_eglp_wait_buffer_displayed,%object\n.size _r_eglp_wait_buffer_displayed,8\n_r_eglp_wait_buffer_displayed:\n.zero 8\n.text\n.globl eglBindAPI\n.type eglBindAPI,%function\neglBindAPI:\n	adrp x16, _r_eglBindAPI\n	ldr x16, [x16, #:lo12:_r_eglBindAPI]\n	br x16\n.globl eglBindTexImage\n.type eglBindTexImage,%function\neglBindTexImage:\n	adrp x16, _r_eglBindTexImage\n	ldr x16, [x16, #:lo12:_r_eglBindTexImage]\n	br x16\n.globl eglChooseConfig\n.type eglChooseConfig,%function\neglChooseConfig:\n	adrp x16, _r_eglChooseConfig\n	ldr x16, [x16, #:lo12:_r_eglChooseConfig]\n	br x16\n.globl eglClientWaitSync\n.type eglClientWaitSync,%function\neglClientWaitSync:\n	adrp x16, _r_eglClientWaitSync\n	ldr x16, [x16, #:lo12:_r_eglClientWaitSync]\n	br x16\n.globl eglClientWaitSyncKHR\n.type eglClientWaitSyncKHR,%function\neglClientWaitSyncKHR:\n	adrp x16, _r_eglClientWaitSyncKHR\n	ldr x16, [x16, #:lo12:_r_eglClientWaitSyncKHR]\n	br x16\n.globl eglCopyBuffers\n.type eglCopyBuffers,%function\neglCopyBuffers:\n	adrp x16, _r_eglCopyBuffers\n	ldr x16, [x16, #:lo12:_r_eglCopyBuffers]\n	br x16\n.globl eglCreateImage\n.type eglCreateImage,%function\neglCreateImage:\n	adrp x16, _r_eglCreateImage\n	ldr x16, [x16, #:lo12:_r_eglCreateImage]\n	br x16\n.globl eglCreateImageKHR\n.type eglCreateImageKHR,%function\neglCreateImageKHR:\n	adrp x16, _r_eglCreateImageKHR\n	ldr x16, [x16, #:lo12:_r_eglCreateImageKHR]\n	br x16\n.globl eglCreatePbufferFromClientBuffer\n.type eglCreatePbufferFromClientBuffer,%function\neglCreatePbufferFromClientBuffer:\n	adrp x16, _r_eglCreatePbufferFromClientBuffer\n	ldr x16, [x16, #:lo12:_r_eglCreatePbufferFromClientBuffer]\n	br x16\n.globl eglCreatePbufferSurface\n.type eglCreatePbufferSurface,%function\neglCreatePbufferSurface:\n	adrp x16, _r_eglCreatePbufferSurface\n	ldr x16, [x16, #:lo12:_r_eglCreatePbufferSurface]\n	br x16\n.globl eglCreatePixmapSurface\n.type eglCreatePixmapSurface,%function\neglCreatePixmapSurface:\n	adrp x16, _r_eglCreatePixmapSurface\n	ldr x16, [x16, #:lo12:_r_eglCreatePixmapSurface]\n	br x16\n.globl eglCreatePlatformPixmapSurface\n.type eglCreatePlatformPixmapSurface,%function\neglCreatePlatformPixmapSurface:\n	adrp x16, _r_eglCreatePlatformPixmapSurface\n	ldr x16, [x16, #:lo12:_r_eglCreatePlatformPixmapSurface]\n	br x16\n.globl eglCreatePlatformWindowSurface\n.type eglCreatePlatformWindowSurface,%function\neglCreatePlatformWindowSurface:\n	adrp x16, _r_eglCreatePlatformWindowSurface\n	ldr x16, [x16, #:lo12:_r_eglCreatePlatformWindowSurface]\n	br x16\n.globl eglCreateSync\n.type eglCreateSync,%function\neglCreateSync:\n	adrp x16, _r_eglCreateSync\n	ldr x16, [x16, #:lo12:_r_eglCreateSync]\n	br x16\n.globl eglCreateSyncImpl\n.type eglCreateSyncImpl,%function\neglCreateSyncImpl:\n	adrp x16, _r_eglCreateSyncImpl\n	ldr x16, [x16, #:lo12:_r_eglCreateSyncImpl]\n	br x16\n.globl eglCreateSyncKHR\n.type eglCreateSyncKHR,%function\neglCreateSyncKHR:\n	adrp x16, _r_eglCreateSyncKHR\n	ldr x16, [x16, #:lo12:_r_eglCreateSyncKHR]\n	br x16\n.globl eglCreateWindowSurface\n.type eglCreateWindowSurface,%function\neglCreateWindowSurface:\n	adrp x16, _r_eglCreateWindowSurface\n	ldr x16, [x16, #:lo12:_r_eglCreateWindowSurface]\n	br x16\n.globl eglDestroyContext\n.type eglDestroyContext,%function\neglDestroyContext:\n	adrp x16, _r_eglDestroyContext\n	ldr x16, [x16, #:lo12:_r_eglDestroyContext]\n	br x16\n.globl eglDestroyImage\n.type eglDestroyImage,%function\neglDestroyImage:\n	adrp x16, _r_eglDestroyImage\n	ldr x16, [x16, #:lo12:_r_eglDestroyImage]\n	br x16\n.globl eglDestroyImageKHR\n.type eglDestroyImageKHR,%function\neglDestroyImageKHR:\n	adrp x16, _r_eglDestroyImageKHR\n	ldr x16, [x16, #:lo12:_r_eglDestroyImageKHR]\n	br x16\n.globl eglDestroySurface\n.type eglDestroySurface,%function\neglDestroySurface:\n	adrp x16, _r_eglDestroySurface\n	ldr x16, [x16, #:lo12:_r_eglDestroySurface]\n	br x16\n.globl eglDestroySync\n.type eglDestroySync,%function\neglDestroySync:\n	adrp x16, _r_eglDestroySync\n	ldr x16, [x16, #:lo12:_r_eglDestroySync]\n	br x16\n.globl eglDestroySyncKHR\n.type eglDestroySyncKHR,%function\neglDestroySyncKHR:\n	adrp x16, _r_eglDestroySyncKHR\n	ldr x16, [x16, #:lo12:_r_eglDestroySyncKHR]\n	br x16\n.globl eglExportDMABUFImageMESA\n.type eglExportDMABUFImageMESA,%function\neglExportDMABUFImageMESA:\n	adrp x16, _r_eglExportDMABUFImageMESA\n	ldr x16, [x16, #:lo12:_r_eglExportDMABUFImageMESA]\n	br x16\n.globl eglExportDMABUFImageQueryMESA\n.type eglExportDMABUFImageQueryMESA,%function\neglExportDMABUFImageQueryMESA:\n	adrp x16, _r_eglExportDMABUFImageQueryMESA\n	ldr x16, [x16, #:lo12:_r_eglExportDMABUFImageQueryMESA]\n	br x16\n.globl eglGetConfigAttrib\n.type eglGetConfigAttrib,%function\neglGetConfigAttrib:\n	adrp x16, _r_eglGetConfigAttrib\n	ldr x16, [x16, #:lo12:_r_eglGetConfigAttrib]\n	br x16\n.globl eglGetConfigs\n.type eglGetConfigs,%function\neglGetConfigs:\n	adrp x16, _r_eglGetConfigs\n	ldr x16, [x16, #:lo12:_r_eglGetConfigs]\n	br x16\n.globl eglGetCurrentContext\n.type eglGetCurrentContext,%function\neglGetCurrentContext:\n	adrp x16, _r_eglGetCurrentContext\n	ldr x16, [x16, #:lo12:_r_eglGetCurrentContext]\n	br x16\n.globl eglGetCurrentDisplay\n.type eglGetCurrentDisplay,%function\neglGetCurrentDisplay:\n	adrp x16, _r_eglGetCurrentDisplay\n	ldr x16, [x16, #:lo12:_r_eglGetCurrentDisplay]\n	br x16\n.globl eglGetCurrentSurface\n.type eglGetCurrentSurface,%function\neglGetCurrentSurface:\n	adrp x16, _r_eglGetCurrentSurface\n	ldr x16, [x16, #:lo12:_r_eglGetCurrentSurface]\n	br x16\n.globl eglGetError\n.type eglGetError,%function\neglGetError:\n	adrp x16, _r_eglGetError\n	ldr x16, [x16, #:lo12:_r_eglGetError]\n	br x16\n.globl eglGetPlatformDisplay\n.type eglGetPlatformDisplay,%function\neglGetPlatformDisplay:\n	adrp x16, _r_eglGetPlatformDisplay\n	ldr x16, [x16, #:lo12:_r_eglGetPlatformDisplay]\n	br x16\n.globl eglGetSyncAttrib\n.type eglGetSyncAttrib,%function\neglGetSyncAttrib:\n	adrp x16, _r_eglGetSyncAttrib\n	ldr x16, [x16, #:lo12:_r_eglGetSyncAttrib]\n	br x16\n.globl eglGetSyncAttribKHR\n.type eglGetSyncAttribKHR,%function\neglGetSyncAttribKHR:\n	adrp x16, _r_eglGetSyncAttribKHR\n	ldr x16, [x16, #:lo12:_r_eglGetSyncAttribKHR]\n	br x16\n.globl eglInitialize\n.type eglInitialize,%function\neglInitialize:\n	adrp x16, _r_eglInitialize\n	ldr x16, [x16, #:lo12:_r_eglInitialize]\n	br x16\n.globl eglMakeCurrent\n.type eglMakeCurrent,%function\neglMakeCurrent:\n	adrp x16, _r_eglMakeCurrent\n	ldr x16, [x16, #:lo12:_r_eglMakeCurrent]\n	br x16\n.globl eglQueryAPI\n.type eglQueryAPI,%function\neglQueryAPI:\n	adrp x16, _r_eglQueryAPI\n	ldr x16, [x16, #:lo12:_r_eglQueryAPI]\n	br x16\n.globl eglQueryContext\n.type eglQueryContext,%function\neglQueryContext:\n	adrp x16, _r_eglQueryContext\n	ldr x16, [x16, #:lo12:_r_eglQueryContext]\n	br x16\n.globl eglQueryDmaBufFormatsEXT\n.type eglQueryDmaBufFormatsEXT,%function\neglQueryDmaBufFormatsEXT:\n	adrp x16, _r_eglQueryDmaBufFormatsEXT\n	ldr x16, [x16, #:lo12:_r_eglQueryDmaBufFormatsEXT]\n	br x16\n.globl eglQueryDmaBufModifiersEXT\n.type eglQueryDmaBufModifiersEXT,%function\neglQueryDmaBufModifiersEXT:\n	adrp x16, _r_eglQueryDmaBufModifiersEXT\n	ldr x16, [x16, #:lo12:_r_eglQueryDmaBufModifiersEXT]\n	br x16\n.globl eglQueryString\n.type eglQueryString,%function\neglQueryString:\n	adrp x16, _r_eglQueryString\n	ldr x16, [x16, #:lo12:_r_eglQueryString]\n	br x16\n.globl eglQuerySurface\n.type eglQuerySurface,%function\neglQuerySurface:\n	adrp x16, _r_eglQuerySurface\n	ldr x16, [x16, #:lo12:_r_eglQuerySurface]\n	br x16\n.globl eglReleaseTexImage\n.type eglReleaseTexImage,%function\neglReleaseTexImage:\n	adrp x16, _r_eglReleaseTexImage\n	ldr x16, [x16, #:lo12:_r_eglReleaseTexImage]\n	br x16\n.globl eglReleaseThread\n.type eglReleaseThread,%function\neglReleaseThread:\n	adrp x16, _r_eglReleaseThread\n	ldr x16, [x16, #:lo12:_r_eglReleaseThread]\n	br x16\n.globl eglSetDamageRegionKHR\n.type eglSetDamageRegionKHR,%function\neglSetDamageRegionKHR:\n	adrp x16, _r_eglSetDamageRegionKHR\n	ldr x16, [x16, #:lo12:_r_eglSetDamageRegionKHR]\n	br x16\n.globl eglSurfaceAttrib\n.type eglSurfaceAttrib,%function\neglSurfaceAttrib:\n	adrp x16, _r_eglSurfaceAttrib\n	ldr x16, [x16, #:lo12:_r_eglSurfaceAttrib]\n	br x16\n.globl eglSwapBuffers\n.type eglSwapBuffers,%function\neglSwapBuffers:\n	adrp x16, _r_eglSwapBuffers\n	ldr x16, [x16, #:lo12:_r_eglSwapBuffers]\n	br x16\n.globl eglSwapInterval\n.type eglSwapInterval,%function\neglSwapInterval:\n	adrp x16, _r_eglSwapInterval\n	ldr x16, [x16, #:lo12:_r_eglSwapInterval]\n	br x16\n.globl eglTerminate\n.type eglTerminate,%function\neglTerminate:\n	adrp x16, _r_eglTerminate\n	ldr x16, [x16, #:lo12:_r_eglTerminate]\n	br x16\n.globl eglWaitClient\n.type eglWaitClient,%function\neglWaitClient:\n	adrp x16, _r_eglWaitClient\n	ldr x16, [x16, #:lo12:_r_eglWaitClient]\n	br x16\n.globl eglWaitGL\n.type eglWaitGL,%function\neglWaitGL:\n	adrp x16, _r_eglWaitGL\n	ldr x16, [x16, #:lo12:_r_eglWaitGL]\n	br x16\n.globl eglWaitNative\n.type eglWaitNative,%function\neglWaitNative:\n	adrp x16, _r_eglWaitNative\n	ldr x16, [x16, #:lo12:_r_eglWaitNative]\n	br x16\n.globl eglWaitSync\n.type eglWaitSync,%function\neglWaitSync:\n	adrp x16, _r_eglWaitSync\n	ldr x16, [x16, #:lo12:_r_eglWaitSync]\n	br x16\n.globl eglWaitSyncKHR\n.type eglWaitSyncKHR,%function\neglWaitSyncKHR:\n	adrp x16, _r_eglWaitSyncKHR\n	ldr x16, [x16, #:lo12:_r_eglWaitSyncKHR]\n	br x16\n.globl egl_cobj_surface_format_create\n.type egl_cobj_surface_format_create,%function\negl_cobj_surface_format_create:\n	adrp x16, _r_egl_cobj_surface_format_create\n	ldr x16, [x16, #:lo12:_r_egl_cobj_surface_format_create]\n	br x16\n.globl egl_color_buffer_flush_mapping_to_cpu\n.type egl_color_buffer_flush_mapping_to_cpu,%function\negl_color_buffer_flush_mapping_to_cpu:\n	adrp x16, _r_egl_color_buffer_flush_mapping_to_cpu\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_flush_mapping_to_cpu]\n	br x16\n.globl egl_color_buffer_flush_mapping_to_gpu\n.type egl_color_buffer_flush_mapping_to_gpu,%function\negl_color_buffer_flush_mapping_to_gpu:\n	adrp x16, _r_egl_color_buffer_flush_mapping_to_gpu\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_flush_mapping_to_gpu]\n	br x16\n.globl egl_color_buffer_get_age\n.type egl_color_buffer_get_age,%function\negl_color_buffer_get_age:\n	adrp x16, _r_egl_color_buffer_get_age\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_age]\n	br x16\n.globl egl_color_buffer_get_block_stride\n.type egl_color_buffer_get_block_stride,%function\negl_color_buffer_get_block_stride:\n	adrp x16, _r_egl_color_buffer_get_block_stride\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_block_stride]\n	br x16\n.globl egl_color_buffer_get_cached_bo\n.type egl_color_buffer_get_cached_bo,%function\negl_color_buffer_get_cached_bo:\n	adrp x16, _r_egl_color_buffer_get_cached_bo\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_cached_bo]\n	br x16\n.globl egl_color_buffer_get_early_display\n.type egl_color_buffer_get_early_display,%function\negl_color_buffer_get_early_display:\n	adrp x16, _r_egl_color_buffer_get_early_display\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_early_display]\n	br x16\n.globl egl_color_buffer_get_fence\n.type egl_color_buffer_get_fence,%function\negl_color_buffer_get_fence:\n	adrp x16, _r_egl_color_buffer_get_fence\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_fence]\n	br x16\n.globl egl_color_buffer_get_format\n.type egl_color_buffer_get_format,%function\negl_color_buffer_get_format:\n	adrp x16, _r_egl_color_buffer_get_format\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_format]\n	br x16\n.globl egl_color_buffer_get_height\n.type egl_color_buffer_get_height,%function\negl_color_buffer_get_height:\n	adrp x16, _r_egl_color_buffer_get_height\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_height]\n	br x16\n.globl egl_color_buffer_get_mapped_address\n.type egl_color_buffer_get_mapped_address,%function\negl_color_buffer_get_mapped_address:\n	adrp x16, _r_egl_color_buffer_get_mapped_address\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_mapped_address]\n	br x16\n.globl egl_color_buffer_get_non_thread_safe\n.type egl_color_buffer_get_non_thread_safe,%function\negl_color_buffer_get_non_thread_safe:\n	adrp x16, _r_egl_color_buffer_get_non_thread_safe\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_non_thread_safe]\n	br x16\n.globl egl_color_buffer_get_num_planes\n.type egl_color_buffer_get_num_planes,%function\negl_color_buffer_get_num_planes:\n	adrp x16, _r_egl_color_buffer_get_num_planes\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_num_planes]\n	br x16\n.globl egl_color_buffer_get_plane_dims\n.type egl_color_buffer_get_plane_dims,%function\negl_color_buffer_get_plane_dims:\n	adrp x16, _r_egl_color_buffer_get_plane_dims\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_plane_dims]\n	br x16\n.globl egl_color_buffer_get_private_buffer_info\n.type egl_color_buffer_get_private_buffer_info,%function\negl_color_buffer_get_private_buffer_info:\n	adrp x16, _r_egl_color_buffer_get_private_buffer_info\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_private_buffer_info]\n	br x16\n.globl egl_color_buffer_get_private_data\n.type egl_color_buffer_get_private_data,%function\negl_color_buffer_get_private_data:\n	adrp x16, _r_egl_color_buffer_get_private_data\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_private_data]\n	br x16\n.globl egl_color_buffer_get_rotation\n.type egl_color_buffer_get_rotation,%function\negl_color_buffer_get_rotation:\n	adrp x16, _r_egl_color_buffer_get_rotation\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_rotation]\n	br x16\n.globl egl_color_buffer_get_width\n.type egl_color_buffer_get_width,%function\negl_color_buffer_get_width:\n	adrp x16, _r_egl_color_buffer_get_width\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_width]\n	br x16\n.globl egl_color_buffer_get_y_inversion\n.type egl_color_buffer_get_y_inversion,%function\negl_color_buffer_get_y_inversion:\n	adrp x16, _r_egl_color_buffer_get_y_inversion\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_y_inversion]\n	br x16\n.globl egl_color_buffer_get_yuva_comp_sizes\n.type egl_color_buffer_get_yuva_comp_sizes,%function\negl_color_buffer_get_yuva_comp_sizes:\n	adrp x16, _r_egl_color_buffer_get_yuva_comp_sizes\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_get_yuva_comp_sizes]\n	br x16\n.globl egl_color_buffer_group_create\n.type egl_color_buffer_group_create,%function\negl_color_buffer_group_create:\n	adrp x16, _r_egl_color_buffer_group_create\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_group_create]\n	br x16\n.globl egl_color_buffer_group_free\n.type egl_color_buffer_group_free,%function\negl_color_buffer_group_free:\n	adrp x16, _r_egl_color_buffer_group_free\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_group_free]\n	br x16\n.globl egl_color_buffer_group_get_layer\n.type egl_color_buffer_group_get_layer,%function\negl_color_buffer_group_get_layer:\n	adrp x16, _r_egl_color_buffer_group_get_layer\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_group_get_layer]\n	br x16\n.globl egl_color_buffer_group_get_num_layers\n.type egl_color_buffer_group_get_num_layers,%function\negl_color_buffer_group_get_num_layers:\n	adrp x16, _r_egl_color_buffer_group_get_num_layers\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_group_get_num_layers]\n	br x16\n.globl egl_color_buffer_group_set_layer\n.type egl_color_buffer_group_set_layer,%function\negl_color_buffer_group_set_layer:\n	adrp x16, _r_egl_color_buffer_group_set_layer\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_group_set_layer]\n	br x16\n.globl egl_color_buffer_increment_age\n.type egl_color_buffer_increment_age,%function\negl_color_buffer_increment_age:\n	adrp x16, _r_egl_color_buffer_increment_age\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_increment_age]\n	br x16\n.globl egl_color_buffer_is_protected\n.type egl_color_buffer_is_protected,%function\negl_color_buffer_is_protected:\n	adrp x16, _r_egl_color_buffer_is_protected\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_is_protected]\n	br x16\n.globl egl_color_buffer_map\n.type egl_color_buffer_map,%function\negl_color_buffer_map:\n	adrp x16, _r_egl_color_buffer_map\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_map]\n	br x16\n.globl egl_color_buffer_new\n.type egl_color_buffer_new,%function\negl_color_buffer_new:\n	adrp x16, _r_egl_color_buffer_new\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_new]\n	br x16\n.globl egl_color_buffer_release\n.type egl_color_buffer_release,%function\negl_color_buffer_release:\n	adrp x16, _r_egl_color_buffer_release\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_release]\n	br x16\n.globl egl_color_buffer_retain\n.type egl_color_buffer_retain,%function\negl_color_buffer_retain:\n	adrp x16, _r_egl_color_buffer_retain\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_retain]\n	br x16\n.globl egl_color_buffer_rgb_format_get_bpp\n.type egl_color_buffer_rgb_format_get_bpp,%function\negl_color_buffer_rgb_format_get_bpp:\n	adrp x16, _r_egl_color_buffer_rgb_format_get_bpp\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_rgb_format_get_bpp]\n	br x16\n.globl egl_color_buffer_set_age\n.type egl_color_buffer_set_age,%function\negl_color_buffer_set_age:\n	adrp x16, _r_egl_color_buffer_set_age\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_age]\n	br x16\n.globl egl_color_buffer_set_cached_bo\n.type egl_color_buffer_set_cached_bo,%function\negl_color_buffer_set_cached_bo:\n	adrp x16, _r_egl_color_buffer_set_cached_bo\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_cached_bo]\n	br x16\n.globl egl_color_buffer_set_early_display\n.type egl_color_buffer_set_early_display,%function\negl_color_buffer_set_early_display:\n	adrp x16, _r_egl_color_buffer_set_early_display\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_early_display]\n	br x16\n.globl egl_color_buffer_set_fence\n.type egl_color_buffer_set_fence,%function\negl_color_buffer_set_fence:\n	adrp x16, _r_egl_color_buffer_set_fence\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_fence]\n	br x16\n.globl egl_color_buffer_set_non_thread_safe\n.type egl_color_buffer_set_non_thread_safe,%function\negl_color_buffer_set_non_thread_safe:\n	adrp x16, _r_egl_color_buffer_set_non_thread_safe\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_non_thread_safe]\n	br x16\n.globl egl_color_buffer_set_private_buffer_info\n.type egl_color_buffer_set_private_buffer_info,%function\negl_color_buffer_set_private_buffer_info:\n	adrp x16, _r_egl_color_buffer_set_private_buffer_info\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_private_buffer_info]\n	br x16\n.globl egl_color_buffer_set_private_data\n.type egl_color_buffer_set_private_data,%function\negl_color_buffer_set_private_data:\n	adrp x16, _r_egl_color_buffer_set_private_data\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_private_data]\n	br x16\n.globl egl_color_buffer_set_rotation\n.type egl_color_buffer_set_rotation,%function\negl_color_buffer_set_rotation:\n	adrp x16, _r_egl_color_buffer_set_rotation\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_rotation]\n	br x16\n.globl egl_color_buffer_set_transform\n.type egl_color_buffer_set_transform,%function\negl_color_buffer_set_transform:\n	adrp x16, _r_egl_color_buffer_set_transform\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_set_transform]\n	br x16\n.globl egl_color_buffer_unmap\n.type egl_color_buffer_unmap,%function\negl_color_buffer_unmap:\n	adrp x16, _r_egl_color_buffer_unmap\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_unmap]\n	br x16\n.globl egl_color_buffer_wrap_external\n.type egl_color_buffer_wrap_external,%function\negl_color_buffer_wrap_external:\n	adrp x16, _r_egl_color_buffer_wrap_external\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_wrap_external]\n	br x16\n.globl egl_color_buffer_wrap_external_planar\n.type egl_color_buffer_wrap_external_planar,%function\negl_color_buffer_wrap_external_planar:\n	adrp x16, _r_egl_color_buffer_wrap_external_planar\n	ldr x16, [x16, #:lo12:_r_egl_color_buffer_wrap_external_planar]\n	br x16\n.globl egl_display_release\n.type egl_display_release,%function\negl_display_release:\n	adrp x16, _r_egl_display_release\n	ldr x16, [x16, #:lo12:_r_egl_display_release]\n	br x16\n.globl egl_env_set\n.type egl_env_set,%function\negl_env_set:\n	adrp x16, _r_egl_env_set\n	ldr x16, [x16, #:lo12:_r_egl_env_set]\n	br x16\n.globl egl_get_winsys_display\n.type egl_get_winsys_display,%function\negl_get_winsys_display:\n	adrp x16, _r_egl_get_winsys_display\n	ldr x16, [x16, #:lo12:_r_egl_get_winsys_display]\n	br x16\n.globl egl_get_winsys_surface\n.type egl_get_winsys_surface,%function\negl_get_winsys_surface:\n	adrp x16, _r_egl_get_winsys_surface\n	ldr x16, [x16, #:lo12:_r_egl_get_winsys_surface]\n	br x16\n.globl egl_register_gles_blob_cache_callbacks\n.type egl_register_gles_blob_cache_callbacks,%function\negl_register_gles_blob_cache_callbacks:\n	adrp x16, _r_egl_register_gles_blob_cache_callbacks\n	ldr x16, [x16, #:lo12:_r_egl_register_gles_blob_cache_callbacks]\n	br x16\n.globl egl_surface_release\n.type egl_surface_release,%function\negl_surface_release:\n	adrp x16, _r_egl_surface_release\n	ldr x16, [x16, #:lo12:_r_egl_surface_release]\n	br x16\n.globl egl_winsys_get_implementation\n.type egl_winsys_get_implementation,%function\negl_winsys_get_implementation:\n	adrp x16, _r_egl_winsys_get_implementation\n	ldr x16, [x16, #:lo12:_r_egl_winsys_get_implementation]\n	br x16\n.globl egl_winsys_get_implementation_gbm\n.type egl_winsys_get_implementation_gbm,%function\negl_winsys_get_implementation_gbm:\n	adrp x16, _r_egl_winsys_get_implementation_gbm\n	ldr x16, [x16, #:lo12:_r_egl_winsys_get_implementation_gbm]\n	br x16\n.globl eglp_call_get_winsys_format_from_eglp_config\n.type eglp_call_get_winsys_format_from_eglp_config,%function\neglp_call_get_winsys_format_from_eglp_config:\n	adrp x16, _r_eglp_call_get_winsys_format_from_eglp_config\n	ldr x16, [x16, #:lo12:_r_eglp_call_get_winsys_format_from_eglp_config]\n	br x16\n.globl eglp_check_attribute_present\n.type eglp_check_attribute_present,%function\neglp_check_attribute_present:\n	adrp x16, _r_eglp_check_attribute_present\n	ldr x16, [x16, #:lo12:_r_eglp_check_attribute_present]\n	br x16\n.globl eglp_config_set_attributes\n.type eglp_config_set_attributes,%function\neglp_config_set_attributes:\n	adrp x16, _r_eglp_config_set_attributes\n	ldr x16, [x16, #:lo12:_r_eglp_config_set_attributes]\n	br x16\n.globl eglp_display_create_default_configs\n.type eglp_display_create_default_configs,%function\neglp_display_create_default_configs:\n	adrp x16, _r_eglp_display_create_default_configs\n	ldr x16, [x16, #:lo12:_r_eglp_display_create_default_configs]\n	br x16\n.globl eglp_find_unterminated_state\n.type eglp_find_unterminated_state,%function\neglp_find_unterminated_state:\n	adrp x16, _r_eglp_find_unterminated_state\n	ldr x16, [x16, #:lo12:_r_eglp_find_unterminated_state]\n	br x16\n.globl eglp_get_attribute_value\n.type eglp_get_attribute_value,%function\neglp_get_attribute_value:\n	adrp x16, _r_eglp_get_attribute_value\n	ldr x16, [x16, #:lo12:_r_eglp_get_attribute_value]\n	br x16\n.globl eglp_has_display_terminated\n.type eglp_has_display_terminated,%function\neglp_has_display_terminated:\n	adrp x16, _r_eglp_has_display_terminated\n	ldr x16, [x16, #:lo12:_r_eglp_has_display_terminated]\n	br x16\n.globl eglp_read_write_buffer\n.type eglp_read_write_buffer,%function\neglp_read_write_buffer:\n	adrp x16, _r_eglp_read_write_buffer\n	ldr x16, [x16, #:lo12:_r_eglp_read_write_buffer]\n	br x16\n.globl eglp_wait_buffer_displayed\n.type eglp_wait_buffer_displayed,%function\neglp_wait_buffer_displayed:\n	adrp x16, _r_eglp_wait_buffer_displayed\n	ldr x16, [x16, #:lo12:_r_eglp_wait_buffer_displayed]\n	br x16");

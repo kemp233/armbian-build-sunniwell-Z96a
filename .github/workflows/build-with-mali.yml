@@ -1173,6 +1173,36 @@ jobs:
             echo '/usr/local/lib/aarch64-linux-gnu'
           } > "$STAGE/etc/ld.so.conf.d/zz-armbian-local.conf"
 
+          # ---- udev 提权规则 -------------------------------------------
+          # VPU / Mali / HEVC / RGA 的设备节点默认是 root:root 0600, 非 root
+          # 用户 (video 组成员除外) 一律打不开。桌面会话现在是 root 跑, 所以
+          # 之前没暴露过; 一旦换成普通用户登录, hwdec 会静默退回软解, 日志里
+          # 只有一句 dlopen 失败, 极难查。
+          #
+          # 为什么不直接靠 packages/bsp/rockchip/: 那个目录下确实有
+          # 50-vpu.rules / 50-mali.rules / 50-hevc.rules / 60-media.rules,
+          # 但 packages/bsp/ 下**只有 rockchip 一个目录**, 没有
+          # rockchip-rk3568-z96a —— 而 BOARDFAMILY 正是后者。Armbian 按
+          # BOARDFAMILY 找 bsp 包时能不能回落到父家族 rockchip, 没有保证。
+          # 所以这里显式写一份进 overlay, 不赌那个回落。
+          mkdir -p "$STAGE/etc/udev/rules.d"
+          {
+            echo '# MPP 视频转译层的服务节点。没有这条, 非 root 用户碰不到 VPU。'
+            echo 'KERNEL=="vpu-service", MODE="0660", GROUP="video"'
+            echo 'KERNEL=="mpp_service", MODE="0660", GROUP="video"'
+            echo '# rkvdec2 走 stateless V4L2 暴露'
+            echo 'KERNEL=="video*", MODE="0660", GROUP="video"'
+            echo 'KERNEL=="media*", MODE="0660", GROUP="video"'
+            echo '# Mali 渲染节点'
+            echo 'KERNEL=="mali0", MODE="0660", GROUP="video"'
+            echo 'KERNEL=="mali", MODE="0660", GROUP="video"'
+            echo '# RGA2 缩放/格式转换'
+            echo 'KERNEL=="rga", MODE="0660", GROUP="video"'
+            echo '# rkvenc HEVC 编码服务'
+            echo 'KERNEL=="hevc-service", MODE="0660", GROUP="video"'
+          } > "$STAGE/etc/udev/rules.d/50-z96a-multimedia.rules"
+          cat "$STAGE/etc/udev/rules.d/50-z96a-multimedia.rules"
+
           # ---- yt-dlp ---------------------------------------------------
           # 镜像里 apt 装的是 2023.03.04, 那个版本解析不了现在的 B站, 直接报
           # "Unable to extract play info"。换官方独立二进制。
@@ -1197,7 +1227,8 @@ jobs:
           echo "=== stage 大小 ==="
           du -sh "$STAGE"
           for must in usr/local/bin/mpv usr/local/bin/ffmpeg usr/local/bin/yt-dlp \
-                     root/.config/mpv/mpv.conf etc/ld.so.conf.d/zz-armbian-local.conf; do
+                     root/.config/mpv/mpv.conf etc/ld.so.conf.d/zz-armbian-local.conf \
+                     etc/udev/rules.d/50-z96a-multimedia.rules; do
             if [ ! -e "$STAGE/$must" ]; then
               echo "断言失败: stage 里缺 $must"
               exit 1
