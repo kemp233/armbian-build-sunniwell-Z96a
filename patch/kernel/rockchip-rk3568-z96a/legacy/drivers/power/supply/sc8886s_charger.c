@@ -64,9 +64,18 @@ static const struct regmap_config sc8886s_regmap_cfg = {
     .cache_type = REGCACHE_NONE,
 };
 
+/* regmap_read() stores a full unsigned int through its data pointer, so it must
+ * never be handed a u8 * directly: on a 64-bit kernel that writes 4 bytes into
+ * a 1-byte stack variable and smashes the caller's frame. That is exactly what
+ * panicked the board in sc8886s_field_write.isra.0 during probe. Read into a
+ * properly sized local and narrow it explicitly. */
 static int sc8886s_read_reg(struct sc8886s_chip *chip, u8 reg, u8 *val)
 {
-    return regmap_read(chip->regmap, reg, (unsigned int *)val);
+    unsigned int v;
+    int ret = regmap_read(chip->regmap, reg, &v);
+    if (ret) return ret;
+    *val = (u8)v;
+    return 0;
 }
 
 static int sc8886s_write_reg(struct sc8886s_chip *chip, u8 reg, u8 val)
