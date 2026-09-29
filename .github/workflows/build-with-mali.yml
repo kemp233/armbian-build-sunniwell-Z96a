@@ -335,6 +335,18 @@ jobs:
           path: our-repo
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Confirm the Z96A desktop fix is present before upload
+        run: |
+          set -euo pipefail
+          # 偏色/音频的修复装在 extension 目录里, 随 custom/ 一起上传。
+          # 漏传的话整条修复静默消失, 而构建一路绿灯到刷机 —— 上传前就掐掉。
+          E=our-repo/custom/extensions/z96a-desktop-fix
+          test -f "$E/z96a-desktop-fix.sh"
+          test -x "$E/overlay/usr/lib/armbian/z96a-desktop-setup"
+          test -f "$E/overlay/usr/lib/systemd/system/z96a-desktop-setup.service"
+          test -f "$E/overlay/var/lib/AccountsService/users/root"
+          find "$E" -type f | sort | sed 's/^/  staging /'
+
       - name: Upload custom files
         uses: actions/upload-artifact@v4
         with:
@@ -484,31 +496,25 @@ jobs:
             rsync -a custom/blobs/ blobs/
           fi
 
-          # overlay/ carries the two fixes that CANNOT be expressed as a
-          # config/ or packages/ change, because both are about what the
-          # running system does rather than what it installs:
+          # 两个修复合在 custom/extensions/z96a-desktop-fix/ 里, 随上面那条
+          # custom/extensions 的 rsync 进 extensions/, 由 extension 的
+          # pre_customize_image 钩子拷进镜像根 —— 和框架自带的
+          # extensions/cloud-init 同一个路子。这里**刻意不用** userpatches/
+          # overlay: 那条路要求自带一份 userpatches/customize-image.sh, 而
+          # armbian/os 已经有一份 (负责删 MS/VSCode/GH 软件源), 覆盖它会回归。
           #
           #   偏色 + 桌面卡顿: gdm3 was already configured for Wayland
           #     (/etc/gdm3/daemon.conf, shipped via packages/blobs/desktop/gdm),
           #     but lightdm was running instead. lightdm means X11, and the Mali
           #     userspace is a gbm-wayland build with no GLX, so X11 fell back
           #     to llvmpipe (gnome-shell burned 47% CPU while idle) and the
-          #     eDP colour cast showed up on that path. overlay carries the
-          #     setup unit that makes gdm3 the display manager and lets root
-          #     autologin.
+          #     eDP colour cast showed up on that path. The extension carries
+          #     the setup unit that makes gdm3 the display manager and lets
+          #     root autologin.
           #
           #   桌面没声音: the root session trips ConditionUser=!root in
           #     Debian's pipewire units, so the whole audio stack was skipped
-          #     silently. overlay carries the drop-ins that clear it.
-          if [ -d "armbian-custom/overlay" ]; then
-            mkdir -p overlay
-            rsync -a "armbian-custom/overlay/" "overlay/"
-            echo "staged overlay/:"
-            find overlay -type f | sed 's/^/  /'
-          else
-            echo "ERROR: armbian-custom/overlay is missing -- the 偏色/音频 fix would silently not ship" >&2
-            exit 1
-          fi
+          #     silently. The extension carries the drop-ins that clear it.
 
           # GitHub artifacts do not preserve Unix permission bits. Restore the
           # executable bit on every file git marks as 0755, using the z96a-repo
@@ -631,13 +637,27 @@ jobs:
           # 把一行代码删掉、却留下解释它为什么存在的那段注释, 断言照样绿 ——
           # 这个坑真的踩过一次: 2026-09-29 写的 PAM 三条断言, 全被脚本里
           # 的说明注释满足, 真正的 sed 代码删了也没人发现。
-          DESKTOP_SETUP="overlay/usr/lib/armbian/z96a-desktop-setup"
-          DESKTOP_SETUP_UNIT="overlay/usr/lib/systemd/system/z96a-desktop-setup.service"
+          Z96A_FIX_EXT="extensions/z96a-desktop-fix"
+          DESKTOP_SETUP="$Z96A_FIX_EXT/overlay/usr/lib/armbian/z96a-desktop-setup"
+          DESKTOP_FIX_SH="$Z96A_FIX_EXT/z96a-desktop-fix.sh"
+          DESKTOP_SETUP_UNIT="$Z96A_FIX_EXT/overlay/usr/lib/systemd/system/z96a-desktop-setup.service"
           GNOME_PKGS="config/desktop/buster/environments/gnome/config_base/packages"
 
+          test -f "$DESKTOP_FIX_SH"
           test -x "$DESKTOP_SETUP"
           test -f "$DESKTOP_SETUP_UNIT"
           # 非注释行; code_grep 是唯一允许的入口, 杜绝再写回裸 grep
+          FIX_SH_CODE="$(mktemp)"
+          grep -v '^[[:space:]]*#' "$DESKTOP_FIX_SH" > "$FIX_SH_CODE"
+          ext_grep() { grep -qE "$1" "$FIX_SH_CODE"; }
+          # extension 自己才是把这些文件拷进镜像的那一步, 所以它本身也
+          # 必须是 extension 形状: 具名 hook + 从自己的目录取数据 + 补 exec 位
+          # (GitHub artifact 不保留权限位)。少了哪一样, 修复就静默不生效。
+          ext_grep '^function pre_customize_image__z96a_desktop_fix\(\)'
+          ext_grep 'EXTENSION_DIR'
+          ext_grep 'chmod 755'
+          ext_grep 'z96a-desktop-setup'
+          ext_grep 'not staged into the image'
           DESKTOP_SETUP_CODE="$(mktemp)"
           grep -v '^[[:space:]]*#' "$DESKTOP_SETUP" > "$DESKTOP_SETUP_CODE"
           code_grep() { grep -qE "$1" "$DESKTOP_SETUP_CODE"; }
@@ -656,15 +676,15 @@ jobs:
           code_grep 'systemctl mask lightdm'
           code_grep 'systemctl enable gdm3'
           # 自动登录要有 AccountsService 那一半, 否则 gdm3 不认
-          test -f overlay/var/lib/AccountsService/users/root
-          grep -q '^AutomaticLoginEnable=true' overlay/var/lib/AccountsService/users/root
+          test -f "$Z96A_FIX_EXT/overlay/var/lib/AccountsService/users/root"
+          grep -q '^AutomaticLoginEnable=true' "$Z96A_FIX_EXT/overlay/var/lib/AccountsService/users/root"
 
           # 音频: ConditionUser=!root 的 drop-in, 五个单元一个都不能少。
           # 少任何一个, 那条服务就还是 "skipped because of an unmet
           # condition check", 桌面上依旧一点声音都没有。
           for u in pipewire.socket pipewire.service pipewire-pulse.socket \
                    pipewire-pulse.service pipewire-media-session.service; do
-            D="overlay/etc/lib/systemd/user/$u.d/z96a-root-session.conf"
+            D="$Z96A_FIX_EXT/overlay/etc/lib/systemd/user/$u.d/z96a-root-session.conf"
             test -f "$D"
             grep -q '^ConditionUser=$' "$D"
           done
