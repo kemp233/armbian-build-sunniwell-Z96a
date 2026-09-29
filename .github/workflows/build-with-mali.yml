@@ -484,6 +484,32 @@ jobs:
             rsync -a custom/blobs/ blobs/
           fi
 
+          # overlay/ carries the two fixes that CANNOT be expressed as a
+          # config/ or packages/ change, because both are about what the
+          # running system does rather than what it installs:
+          #
+          #   偏色 + 桌面卡顿: gdm3 was already configured for Wayland
+          #     (/etc/gdm3/daemon.conf, shipped via packages/blobs/desktop/gdm),
+          #     but lightdm was running instead. lightdm means X11, and the Mali
+          #     userspace is a gbm-wayland build with no GLX, so X11 fell back
+          #     to llvmpipe (gnome-shell burned 47% CPU while idle) and the
+          #     eDP colour cast showed up on that path. overlay carries the
+          #     setup unit that makes gdm3 the display manager and lets root
+          #     autologin.
+          #
+          #   桌面没声音: the root session trips ConditionUser=!root in
+          #     Debian's pipewire units, so the whole audio stack was skipped
+          #     silently. overlay carries the drop-ins that clear it.
+          if [ -d "armbian-custom/overlay" ]; then
+            mkdir -p overlay
+            rsync -a "armbian-custom/overlay/" "overlay/"
+            echo "staged overlay/:"
+            find overlay -type f | sed 's/^/  /'
+          else
+            echo "ERROR: armbian-custom/overlay is missing -- the 偏色/音频 fix would silently not ship" >&2
+            exit 1
+          fi
+
           # GitHub artifacts do not preserve Unix permission bits. Restore the
           # executable bit on every file git marks as 0755, using the z96a-repo
           # checkout as the reference. Without this, /etc/initramfs/post-update.d/99-uboot
@@ -521,6 +547,25 @@ jobs:
           GDM_DAEMON_CONF="packages/blobs/desktop/gdm/daemon.conf"
           GNOME_DESKTOP_PKG="config/desktop/buster/environments/gnome/armbian/create_desktop_package.sh"
 
+          # 断言助手。刻意不用 `! grep ...` 的写法:
+          # bash 手册在 set -e 一节里写明, 返回值被 `!` 取反的命令
+          # **不触发** errexit。所以 `! grep -q X f` 在 set -e 下永远退不出
+          # 脚本 —— 它是一条装饰性的守卫, 看着在守着, 实际连一次都没生效过。
+          # 本文件里曾经就有三条这种空转的断言。这里改成显式 if + 报错 +
+          # exit 1, 结论不依赖 shell 对 ! 的处理。
+          assert_present() {
+            if ! grep -qE "$1" "$2"; then
+              echo "断言失败: 必需的模式 '$1' 不在 $2 里" >&2
+              exit 1
+            fi
+          }
+          assert_absent() {
+            if grep -qE "$1" "$2"; then
+              echo "断言失败: 不该出现的模式 '$1' 出现在 $2 里" >&2
+              exit 1
+            fi
+          }
+
           test -f "$KCONFIG"
           test -f "$BOARD_CONFIG"
           test -f "$PATCH_CONFIG"
@@ -535,7 +580,7 @@ jobs:
           # gdm3 owns /etc/gdm3/daemon.conf. If the desktop package ever ships
           # it again, dpkg refuses to unpack the package and the image build
           # dies with Error 100, so catch it here instead.
-          ! grep -qE '^[^#]*(cp|install).*gdm3/daemon\.conf' "$GNOME_DESKTOP_PKG"
+          assert_absent '^[^#]*(cp|install).*gdm3/daemon\.conf' "$GNOME_DESKTOP_PKG"
           test -f "$UBOOT_PATCH/0003-add-full-uboot-commands.patch"
           test -f "$UBOOT_PATCH/0004-enable-gpio3-gpio4-i2c0-saradc.patch"
           test -f packages/blobs/rk35/rk3568_ddr_1184MHz_android5042_z96a.bin
@@ -563,17 +608,80 @@ jobs:
           # 2026-09-28 的 b89863e41 修的是 custom/config/boards/ 那份死副本, 本
           # workflow 根本不取, 所以修复从未进入镜像。板子配置只认 $BOARD_CONFIG。
           grep -q 'kernel_config_set_y CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
-          ! grep -qE 'kernel_config_set_n[[:space:]]+CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
+          assert_absent 'kernel_config_set_n[[:space:]]+CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
           # Z96A 的 9 个内核修复已经并进 kemp233/linux-rockchip 的 rk-6.1-rkr7.2
           # 分支 (commit c16c640e45a9), 而板配置的 KERNELBRANCH 直接指向那个
           # 分支, 所以这里不再打任何内核补丁。legacy/ 下只应剩下:
           #   0000.patching_config.yaml  —— 提供 dt/ 的 dts-directories 拷贝机制
           #   dt/  和 drivers/             —— 板级数据, 原样拷贝, 不是补丁
           # 再往这里塞 .patch 就是"同一处代码存在两份", 迟早有一份不生效。
-          ! find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | grep -q .
+          if find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | grep -q .; then
+            echo "断言失败: legacy/ 下不该再有 .patch —— 9 个内核修复已并入 rk-6.1-rkr7.2, 再打一遍就是同一处代码两份" >&2
+            exit 1
+          fi
           test -d patch/kernel/rockchip-rk3568-z96a/legacy/dt
           grep -q 'dts-directories' "$PATCH_CONFIG"
           test ! -e patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
+
+          # --- 偏色 + 音频: overlay 必须在, 且内容不能被改空 ---------------
+          # 这两项都曾以"已修好"的状态存在过, 实际都没进镜像。断言写死形状,
+          # 下次有人删改时构建直接红, 而不是刷完机才发现又复现。
+          #
+          # 内容断言一律跑在**剥掉整行注释之后**的文本上。只 grep 原文的话,
+          # 把一行代码删掉、却留下解释它为什么存在的那段注释, 断言照样绿 ——
+          # 这个坑真的踩过一次: 2026-09-29 写的 PAM 三条断言, 全被脚本里
+          # 的说明注释满足, 真正的 sed 代码删了也没人发现。
+          DESKTOP_SETUP="overlay/usr/lib/armbian/z96a-desktop-setup"
+          DESKTOP_SETUP_UNIT="overlay/usr/lib/systemd/system/z96a-desktop-setup.service"
+          GNOME_PKGS="config/desktop/buster/environments/gnome/config_base/packages"
+
+          test -x "$DESKTOP_SETUP"
+          test -f "$DESKTOP_SETUP_UNIT"
+          # 非注释行; code_grep 是唯一允许的入口, 杜绝再写回裸 grep
+          DESKTOP_SETUP_CODE="$(mktemp)"
+          grep -v '^[[:space:]]*#' "$DESKTOP_SETUP" > "$DESKTOP_SETUP_CODE"
+          code_grep() { grep -qE "$1" "$DESKTOP_SETUP_CODE"; }
+
+          # 脚本是幂等的, 但绝不能失败退出: 桌面修不好顶多退回 X11,
+          # 不能把机器卡在开不了机。
+          code_grep '^exit 0$'
+          # PAM 那条 user != root 必须真的被改写, 否则 root 自动登录静默失败,
+          # 现象是登录屏上 root 怎么都登不进去。
+          code_grep 'pam_succeed_if'
+          code_grep 'gdm-password'
+          code_grep '^[[:space:]]*sed -i'
+          # lightdm 混装是偏色和卡顿的根因, 脚本必须真的去停用它,
+          # 并且把 gdm3 顶上来。
+          code_grep 'dpkg-query .*lightdm'
+          code_grep 'systemctl mask lightdm'
+          code_grep 'systemctl enable gdm3'
+          # 自动登录要有 AccountsService 那一半, 否则 gdm3 不认
+          test -f overlay/var/lib/AccountsService/users/root
+          grep -q '^AutomaticLoginEnable=true' overlay/var/lib/AccountsService/users/root
+
+          # 音频: ConditionUser=!root 的 drop-in, 五个单元一个都不能少。
+          # 少任何一个, 那条服务就还是 "skipped because of an unmet
+          # condition check", 桌面上依旧一点声音都没有。
+          for u in pipewire.socket pipewire.service pipewire-pulse.socket \
+                   pipewire-pulse.service pipewire-media-session.service; do
+            D="overlay/etc/lib/systemd/user/$u.d/z96a-root-session.conf"
+            test -f "$D"
+            grep -q '^ConditionUser=$' "$D"
+          done
+
+          # 音频包: pipewire-audio 一次性带上 pipewire-pulse + pipewire-alsa +
+          # wireplumber, 且与 pulseaudio 互斥。单装 pulseaudio 不提供
+          # /usr/bin/pipewire-pulse, 整条音频栈就静默不启动。
+          grep -qx 'pipewire-audio' "$GNOME_PKGS"
+          grep -qx 'pulseaudio-utils' "$GNOME_PKGS"
+          assert_absent '^pulseaudio$' "$GNOME_PKGS"
+          assert_absent '^pulseaudio-module-bluetooth$' "$GNOME_PKGS"
+          # gdm3 早已配好 Wayland, 但历史上装过依赖 lightdm 的 xfce 桌面包,
+          # 所以这个包列表里绝不能再出现 lightdm。
+          grep -qx 'gdm3' "$GNOME_PKGS"
+          assert_absent '^lightdm$' "$GNOME_PKGS"
+          echo '偏色 (gdm3/Wayland) 与音频 (pipewire) 修复的形状已校验'
+
           echo 'Complete customizations and accelerator inputs verified'
 
       - name: Free disk space
