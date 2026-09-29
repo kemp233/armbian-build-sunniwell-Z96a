@@ -1032,6 +1032,43 @@ jobs:
           MPV_TAG=v0.38.0
           YTDLP_URL=https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
 
+          # ---- 安装根: runner 可写, 模拟镜像的 / --------------------------
+          # run 36578273991 暴露的: GitHub runner 的 /usr/local 是 root 的,
+          # runner 用户写不了 —— `cmake --install` 报
+          #   file INSTALL cannot make directory
+          #   ".../mpp-build-prefix/include/rockchip": No such file or directory
+          # 中间层 mkdir 被 EACCES 拒掉后, 最后一级才报出误导性的 ENOENT。
+          # 修法不是 sudo —— sudo 装出来的东西 ownership 一团糟, 而且把构建
+          # 产物灌进 runner 系统目录本来就脏。统一改成: 一切 configure 仍然
+          # 用 --prefix=/usr/local (和镜像里的路径一致, .pc 内容不用改), 但
+          # **安装一律加 DESTDIR=$INSTALL_ROOT**, 落到工作区里; 构建期靠
+          # PKG_CONFIG_SYSROOT_DIR 把 -I/-L 重定向到 $INSTALL_ROOT 下。
+          # 这也是镜像布局的真实预演: 装出来的树就是镜像里 /usr/local 的形状。
+          # 构建期怎么链接到这棵树, 见下面 BUILD_PC 的注释。
+          INSTALL_ROOT="$PWD/.local-root"
+          mkdir -p "$INSTALL_ROOT"
+          # 刻意**不用** PKG_CONFIG_SYSROOT_DIR: 它会无差别重写所有 .pc 的
+          # 路径, 连系统库 (openssl/libdrm/x11, 都在 /usr) 也被指到
+          # $INSTALL_ROOT/usr/... 下不存在的地方, ffmpeg 的 configure 检查
+          # 反而全挂。构建期路径问题用下面的 BUILD_PC 镜像解决。
+          export CFLAGS="-I$INSTALL_ROOT/usr/local/include ${CFLAGS:-}"
+          export LDFLAGS="-L$INSTALL_ROOT/usr/local/lib ${LDFLAGS:-}"
+
+          # BUILD_PC: INSTALL_ROOT 里 .pc 的构建期镜像。安装树里的 .pc 全是
+          # prefix=/usr/local (镜像形状, 随镜像走, 一个字不改); 但构建时
+          # pkg-config 展开成 -L/usr/local/lib 是空的, 链接必炸。镜像一份
+          # 把 prefix 行重写成 $INSTALL_ROOT/usr/local, 放在 PKG_CONFIG_PATH
+          # 最前面 —— 系统库不受影响 (它们不在这两个目录里), 自己编的库
+          # 全部指对。
+          BUILD_PC="$PWD/.pc-build"
+          mkdir -p "$BUILD_PC"
+          find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+               "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+               -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+            sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+          done
+          export PKG_CONFIG_PATH="$BUILD_PC:${PKG_CONFIG_PATH:-}"
+
           cd "$WORK"
           # ---- MPP 先行 -------------------------------------------------
           # FFmpeg 的 configure 要 pkg-config 找到 rockchip_mpp: nyanmisaka
@@ -1042,27 +1079,23 @@ jobs:
           # MPP 1.1.0 的 .pc 报 Version: 1.3.10 (pkgconfig/rockchip_mpp.pc.cmake
           # 里写死的), 满足 >= 1.3.9。版本钉死成和 rockchip-multimedia.sh
           # 一致的 1.1.0, soname 对得上, 下一步不再重编。
-          MPP_PREFIX=/usr/local/mpp-build-prefix
-          if [ ! -f "$MPP_PREFIX/lib/pkgconfig/rockchip_mpp.pc" ]; then
+          if [ ! -f "$INSTALL_ROOT/usr/local/lib/pkgconfig/rockchip_mpp.pc" ]; then
             git clone --depth 1 --branch 1.1.0 \
               https://github.com/rockchip-linux/mpp.git mpp
             # MPP 的 cmake 默认会开一堆我们用不上的东西, 关掉以省时间。
             cmake -S mpp -B mpp/build -DCMAKE_BUILD_TYPE=Release \
-                  -DCMAKE_INSTALL_PREFIX="$MPP_PREFIX" \
+                  -DCMAKE_INSTALL_PREFIX=/usr/local \
                   -DCMAKE_INSTALL_LIBDIR=lib
             cmake --build mpp/build -j"$(nproc)"
-            cmake --install mpp/build
+            DESTDIR="$INSTALL_ROOT" cmake --install mpp/build
           else
-            echo "MPP 已就绪 (上一个 step 编的), 跳过"
+            echo "MPP 已就绪, 跳过"
           fi
-          # FFmpeg configure 靠这两样找到 MPP: pkg-config 拿版本, 头文件
-          # 在 CFLAGS 里。缺任何一个都是同样的 configure 失败。
-          export PKG_CONFIG_PATH="$MPP_PREFIX/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CFLAGS="-I$MPP_PREFIX/include ${CFLAGS:-}"
-          export LDFLAGS="-L$MPP_PREFIX/lib ${LDFLAGS:-}"
+          # FFmpeg configure 靠 pkg-config 找 MPP (版本断言), 头文件和链接
+          # 路径由上面的 CFLAGS/LDFLAGS + BUILD_PC 镜像提供。
           if ! pkg-config --exists 'rockchip_mpp >= 1.3.9'; then
-            echo "断言失败: MPP 编完 pkg-config 还是找不到 rockchip_mpp >= 1.3.9"
-            find "$MPP_PREFIX" -name 'rockchip_mpp.pc' -o -name 'librockchip_mpp*' | head -10
+            echo "断言失败: MPP 装完 pkg-config 还是找不到 rockchip_mpp >= 1.3.9"
+            find "$INSTALL_ROOT/usr/local" -name 'rockchip_mpp.pc' -o -name 'librockchip_mpp*' | head -10
             exit 1
           fi
           echo "MPP: pkg-config 报 $(pkg-config --modversion rockchip_mpp), >= 1.3.9 满足"
@@ -1102,20 +1135,22 @@ jobs:
             --disable-doc --disable-debug \
             --disable-programs
           make -j"$(nproc)"
-          make install
-          ldconfig
+          # DESTDIR 安装进 INSTALL_ROOT (见上面的注释)。ffmpeg 不设 rpath,
+          # 跑它要靠 LD_LIBRARY_PATH 指进安装树。
+          make install DESTDIR="$INSTALL_ROOT"
 
           # 立刻验 https 真的通了再往下走 —— 这一条不验, 后面全都白编。
-          if ! ffmpeg -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx https; then
+          export LD_LIBRARY_PATH="$INSTALL_ROOT/usr/local/lib:${LD_LIBRARY_PATH:-}"
+          if ! "$INSTALL_ROOT/usr/local/bin/ffmpeg" -hide_banner -protocols 2>/dev/null | tr ' ' '\n' | grep -qx https; then
             echo "断言失败: 编出来的 FFmpeg 仍然没有 https 协议"
-            ffmpeg -hide_banner -protocols 2>&1 | head -20
+            "$INSTALL_ROOT/usr/local/bin/ffmpeg" -hide_banner -protocols 2>&1 | head -20
             exit 1
           fi
           echo "FFmpeg https 协议: 已启用"
           # 同样当场验 rkmpp 真的编进去了
-          if ! ffmpeg -hide_banner -hwaccels 2>/dev/null | grep -qx rkmpp; then
+          if ! "$INSTALL_ROOT/usr/local/bin/ffmpeg" -hide_banner -hwaccels 2>/dev/null | grep -qx rkmpp; then
             echo "断言失败: 编出来的 FFmpeg 没有 rkmpp 硬解"
-            ffmpeg -hide_banner -hwaccels 2>&1 | head -20
+            "$INSTALL_ROOT/usr/local/bin/ffmpeg" -hide_banner -hwaccels 2>&1 | head -20
             exit 1
           fi
           echo "FFmpeg rkmpp 硬解: 已启用"
@@ -1143,20 +1178,35 @@ jobs:
             echo "  libshaderc1 是 libshaderc-dev 的依赖, 不该缺。检查 apt 源。"
             exit 1
           fi
-          ln -sf libshaderc.so.1 /usr/lib/aarch64-linux-gnu/libshaderc.so
-          echo "已补 libshaderc.so -> libshaderc.so.1 符号链接"
-          mkdir -p /usr/local/lib/pkgconfig
+          # 发行版 bug 的修法也要进 INSTALL_ROOT: /usr/local 系统目录写不了
+          # (run 36578273991), 而且这份 .pc 最终就是要随镜像走的。
+          # 把 libshaderc.so.1 连同缺失的 .so 符号链接一起复制进
+          # $INSTALL_ROOT/usr/local/lib, shaderc.pc 的 libdir 指向同一个
+          # 地方 —— 构建期 BUILD_PC 镜像指对它, 镜像里由 /usr/local/lib
+          # (ld.so.conf.d) 接管, 不依赖发行版的 libshaderc1。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig"
+          cp -a /usr/lib/aarch64-linux-gnu/libshaderc.so.1 \
+                "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1"
+          ln -sf libshaderc.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc.so"
           {
-            echo 'prefix=/usr'
-            echo 'libdir=/usr/lib/aarch64-linux-gnu'
-            echo 'includedir=/usr/include'
+            echo 'prefix=/usr/local'
+            echo 'exec_prefix=${prefix}'
+            echo 'libdir=${prefix}/lib'
+            echo 'includedir=${prefix}/include'
             echo ''
             echo 'Name: shaderc'
             echo 'Description: GLSL to SPIR-V compiler (shared, glslang+spvtools 已静态内含)'
             echo 'Version: 2023.8'
             echo 'Libs: -L${libdir} -lshaderc -lpthread -lstdc++ -lm'
             echo 'Cflags: -I${includedir}'
-          } > /usr/local/lib/pkgconfig/shaderc.pc
+          } > "$INSTALL_ROOT/usr/local/lib/pkgconfig/shaderc.pc"
+          # MPP/ffmpeg 的 DESTDIR 安装发生在上面, 此刻才有 .pc 可镜像 ——
+          # 刷新 BUILD_PC, 否则链接测试找不到刚装的库。
+          find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+               "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+               -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+            sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+          done
           # 用覆盖后的 .pc 实际链接一次, 骗不了人: 找不到符号当场死。
           printf 'int main(void){return 0;}\n' > /tmp/shc-test.c
           if ! gcc /tmp/shc-test.c $(pkg-config --cflags --libs shaderc) -o /tmp/shc-test 2>/tmp/shc-test.err; then
@@ -1164,9 +1214,7 @@ jobs:
             cat /tmp/shc-test.err | head -15
             exit 1
           fi
-          echo "shaderc.pc 链接测试通过"
-          export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
-          ldconfig
+          echo "shaderc.pc 链接测试通过 (BUILD_PC 镜像路径)"
 
           # ---- libplacebo ----------------------------------------------
           # shaderc 必须显式 enabled、glslang 必须显式 disabled。两者都是
@@ -1191,9 +1239,14 @@ jobs:
             exit 1
           fi
           echo "libplacebo 走的 shaderc 路线 (spirv_shaderc.o 已编出)"
-          meson install -C build
-          ldconfig
+          DESTDIR="$INSTALL_ROOT" meson install -C build
           cd "$WORK"
+          # libplacebo.pc 刚落地, 刷新 BUILD_PC, mpv 才能链接到它。
+          find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+               "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+               -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+            sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+          done
 
           # ---- mpv 0.38 -------------------------------------------------
           # 三个补丁, 全是 FFmpeg 7.x 的 API 变更, 每一个都断言改了行数 ——
@@ -1224,47 +1277,46 @@ jobs:
             -Dlibmpv=true \
             -Dcplayer=false
           meson compile -C build
-          meson install -C build
-          ldconfig
+          DESTDIR="$INSTALL_ROOT" meson install -C build
           cd "$WORK"
 
           # ---- 装进 stage -----------------------------------------------
-          # 注意 libplacebo 在 aarch64 上是 multiarch 路径, 不是 /usr/local/lib。
-          mkdir -p "$STAGE/usr/local/bin" "$STAGE/usr/local/lib" \
-                   "$STAGE/usr/local/lib/aarch64-linux-gnu" \
-                   "$STAGE/usr/local/lib/pkgconfig" \
-                   "$STAGE/root/.config/mpv" \
-                   "$STAGE/etc/ld.so.conf.d"
+          # 全部从 $INSTALL_ROOT/usr/local 取 (一切安装都 DESTDIR 进了那里,
+          # 见本 step 开头的注释)。树形和镜像里 /usr/local 一模一样。
+          # 注意 libplacebo 在 aarch64 上是 multiarch 路径, 不是 lib/。
+          for d in usr/local/bin usr/local/lib usr/local/lib/aarch64-linux-gnu \
+                   usr/local/lib/pkgconfig root/.config/mpv etc/ld.so.conf.d; do
+            mkdir -p "$STAGE/$d"
+          done
 
           for b in mpv ffmpeg ffprobe; do
-            if [ ! -e "/usr/local/bin/$b" ]; then
+            if [ ! -e "$INSTALL_ROOT/usr/local/bin/$b" ]; then
               echo "断言失败: 没编出 $b"
               exit 1
             fi
-            cp -a "/usr/local/bin/$b" "$STAGE/usr/local/bin/"
+            cp -a "$INSTALL_ROOT/usr/local/bin/$b" "$STAGE/usr/local/bin/"
           done
           # 库。注意 tar 保留符号链接 —— libavcodec.so.62 指向 .so.62.x.y,
-          # 只 cp 一层会断链。
-          ( cd /usr/local/lib && find . -maxdepth 1 \
-              \( -name 'libav*.so*' -o -name 'libsw*.so*' \) -print0 \
+          # 只 cp 一层会断链。MPP 的 librockchip_mpp* 也在 lib/ 里但**不能**
+          # 带: 镜像里的 MPP 由 rockchip-multimedia.sh 提供, 带过去就是两份。
+          ( cd "$INSTALL_ROOT/usr/local/lib" && find . -maxdepth 1 \
+              \( -name 'libav*.so*' -o -name 'libsw*.so*' -o -name 'libshaderc.so*' \) -print0 \
               | tar --null -cf - -T - ) \
             | ( cd "$STAGE/usr/local/lib" && tar xf - )
-          ( cd /usr/local/lib/aarch64-linux-gnu && find . -maxdepth 1 \
+          ( cd "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu" && find . -maxdepth 1 \
               -name 'libplacebo*' -print0 | tar --null -cf - -T - ) \
             | ( cd "$STAGE/usr/local/lib/aarch64-linux-gnu" && tar xf - )
-          # 头文件和 .pc 给将来在板子上重编东西用
-          if [ -d /usr/local/include ]; then
-            cp -a /usr/local/include "$STAGE/usr/local/"
+          # 头文件和 .pc 给将来在板子上重编东西用。.pc 的 prefix 都是
+          # /usr/local (configure 时定的), 和镜像里的路径一致。MPP 的
+          # rockchip_*.pc 除外 —— 镜像里的 MPP 有自己的来源。
+          if [ -d "$INSTALL_ROOT/usr/local/include" ]; then
+            cp -a "$INSTALL_ROOT/usr/local/include" "$STAGE/usr/local/"
           fi
-          if [ -d /usr/local/lib/pkgconfig ]; then
-            cp -a /usr/local/lib/pkgconfig/. "$STAGE/usr/local/lib/pkgconfig/"
+          if [ -d "$INSTALL_ROOT/usr/local/lib/pkgconfig" ]; then
+            find "$INSTALL_ROOT/usr/local/lib/pkgconfig" -maxdepth 1 \
+                 -name '*.pc' ! -name 'rockchip_*' \
+                 -exec cp -a {} "$STAGE/usr/local/lib/pkgconfig/" \;
           fi
-          # libshaderc.so.1 也必须进 stage: libplacebo 链的是发行版这个库,
-          # 而镜像里**不会** apt 装 libshaderc1 (bookworm 的镜像, 包名都
-          # 对不上)。跟着 /usr/local/lib 走, 由下面的 ld.so.conf 接管查找。
-          # glslang 和 SPIRV-Tools 已静态打进这个 .so, 带这一个就够。
-          cp -a /usr/lib/aarch64-linux-gnu/libshaderc.so.1 \
-                "$STAGE/usr/local/lib/libshaderc.so.1"
 
           # ldconfig 必须知道去这两个地方找, 否则 mpv 一跑就
           # "error while loading shared libraries: libplacebo.so.338"
@@ -1493,21 +1545,24 @@ jobs:
           # 浪费, 还可能在 runner 缓存不一致时编出不同版本。
           # run 36575615110 的反面教训: 曾经把 MPP 构建放在这里、FFmpeg 在
           # 前面一步, 顺序颠倒导致 configure 找不到 rockchip_mpp >= 1.3.9。
-          MPP_PREFIX=/usr/local/mpp-build-prefix
-          if [ ! -f "$MPP_PREFIX/lib/pkgconfig/rockchip_mpp.pc" ]; then
-            echo "断言失败: 上一个 step 应该已编好 MPP, 但 $MPP_PREFIX 里没有 .pc"
+          # 安装树和 BUILD_PC 镜像要和上一个 step 完全一致 (变量不跨 step,
+          # 各自重建)。不重建的话 pkg-config 会把 -L 指到真正的
+          # /usr/local —— runner 上那里是空的, 链接必炸。
+          INSTALL_ROOT="$PWD/.local-root"
+          BUILD_PC="$PWD/.pc-build"
+          mkdir -p "$BUILD_PC"
+          find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+               "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+               -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+            sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+          done
+          export PKG_CONFIG_PATH="$BUILD_PC:${PKG_CONFIG_PATH:-}"
+          if [ ! -f "$INSTALL_ROOT/usr/local/lib/pkgconfig/rockchip_mpp.pc" ]; then
+            echo "断言失败: 上一个 step 应该已编好 MPP, 但 $INSTALL_ROOT 里没有 .pc"
             echo "  两个 step 共用同一个 MPP, 检查 step 顺序是否被改动"
             exit 1
           fi
           echo "复用上一个 step 编好的 MPP: $(pkg-config --modversion rockchip_mpp 2>/dev/null || echo '?')"
-          # MPP 的 pkgconfig 装到 prefix 下, 显式告诉 meson 去哪找
-          find "$MPP_PREFIX" -name '*.pc' -exec dirname {} \; | sort -u | while read -r d; do
-            PKG_CONFIG_PATH="$d:${PKG_CONFIG_PATH:-}"
-          done
-          # 上面 while 在子 shell 里, 变量出不来, 所以显式再设一次
-          export PKG_CONFIG_PATH="$MPP_PREFIX/lib/pkgconfig:$MPP_PREFIX/lib/aarch64-linux-gnu/pkgconfig:/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
-          export CFLAGS="-I$MPP_PREFIX/include ${CFLAGS:-}"
-          export LDFLAGS="-L$MPP_PREFIX/lib -L$MPP_PREFIX/lib/aarch64-linux-gnu ${LDFLAGS:-}"
 
           # 钉死 commit 而不是跟 default 分支: 这个仓库没有 tag, default 分支
           # 一动, 镜像里的编解码能力就跟着变, 而 CI 不会告诉你。
@@ -1548,11 +1603,11 @@ jobs:
           DESTDIR="$STAGE" meson install -C build
           cd "$WORK"
 
-          # 删掉临时 MPP, 别让它混进 stage (镜像里的 MPP 由
-          # rockchip-multimedia.sh 提供, 版本同为 1.1.0)。
-          rm -rf "$MPP_PREFIX"
-          # 如果 meson 顺带把 MPP 也装进了 stage, 删掉
+          # MPP 别混进 stage (镜像里的 MPP 由 rockchip-multimedia.sh 提供,
+          # 版本同为 1.1.0)。INSTALL_ROOT 里的 MPP 不动 —— 删掉它的话下一个
+          # 重试 step 就没得复用了。
           find "$STAGE" -name 'librockchip_mpp*' -print -delete || true
+          find "$STAGE" -name 'rockchip_*.pc' -print -delete || true
 
           # ---- 自检 ------------------------------------------------------
           if [ ! -x "$STAGE/root/.local/bin/mpv-handler" ]; then
