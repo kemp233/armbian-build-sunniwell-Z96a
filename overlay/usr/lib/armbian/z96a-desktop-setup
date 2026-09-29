@@ -1,0 +1,93 @@
+#!/bin/bash
+# Z96A 桌面会话修复 —— 必须在 display-manager 之前跑完。
+#
+# 背景 (2026-09-29 实测):
+#   板子上 lightdm 装着并且实际在跑, 提供 Xorg :0 和桌面; 但它在 systemd
+#   里是 disabled, 而 display-manager.service 链的是 gdm.service。
+#   gdm3 那边 /etc/gdm3/daemon.conf 早就配好了 Wayland
+#   (WaylandEnable=true / PreferredDisplayServer=wayland), 硬件 EGL 和
+#   EGL_EXT_image_dma_buf_import 都实测正常 —— Wayland 一直配着, 只是
+#   没人启动 gdm3。
+#
+#   lightdm 走 X11, 而 Mali 用户态是 gbm-wayland 变体不带 GLX, 于是 X11 下
+#   拿不到硬件 OpenGL, 全部退回 Mesa llvmpipe 软件光栅: gnome-shell 空闲
+#   就烧 47% CPU。而且 eDP 偏色也在 X11 这条路径上, 换成 gdm3/Wayland 后
+#   偏色消失 —— 注意这不是内核改动带来的, 见 Z96A-KERNEL-CHANGES.md。
+#
+# 本脚本只做幂等修补, 任何一步失败都不应挡住开机, 所以全程不 set -e,
+# 失败只记录并继续。
+
+set -u
+log() { echo "z96a-desktop-setup: $*"; }
+
+# ---------------------------------------------------------------- 1. PAM
+# /etc/pam.d/gdm-password 里默认有
+#     auth required pam_succeed_if.so user != root quiet_success
+# 它挡的不只是"用 root 手动登录", GDM 的**自动登录也要走这条认证链**,
+# 而且失败是静默的 —— 日志里只剩 gdm-session-worker [pam/gdm-password],
+# 看不到明确报错。实测注释掉之后 AutomaticLogin=root 立刻生效。
+#
+# 用 sed 而不是往 overlay 里塞一份 /etc/pam.d/gdm-password: 那个文件归 gdm3
+# 包所有, 覆盖它会变成 conffile, 以后 unattended-upgrade 升 gdm3 会卡在
+# 交互式 conffile 提示上。
+PAM=/etc/pam.d/gdm-password
+if [ -f "$PAM" ] && grep -qE '^[[:space:]]*auth[[:space:]]+required[[:space:]]+pam_succeed_if\.so[[:space:]]+user[[:space:]]*!=[[:space:]]*root' "$PAM"; then
+	sed -i -E 's|^([[:space:]]*auth[[:space:]]+required[[:space:]]+pam_succeed_if\.so[[:space:]]+user[[:space:]]*!=[[:space:]]*root.*)$|# 由 z96a-desktop-setup 注释: 本板以 root 身份运行图形会话, 且 GDM 自动登录\n# 同样要走这条认证链, 不放开就静默失败。\n#&|' "$PAM"
+	log "已放开 gdm-password 的 user != root 限制"
+else
+	log "gdm-password 已是放开状态, 跳过"
+fi
+
+# ------------------------------------------------------- 2. gdm3 自动登录
+# 写 custom.conf 而不是只靠 AccountsService: 两者都写, AccountsService 优先,
+# 任何一边被别的工具覆盖都还有一层兜底。
+GDM_CONF=/etc/gdm3/custom.conf
+mkdir -p /etc/gdm3
+if ! grep -q '^AutomaticLoginEnable=true' "$GDM_CONF" 2>/dev/null; then
+	cat > "$GDM_CONF" <<'CONF'
+# 由 z96a-desktop-setup 写入。
+# 这台板子开机就进桌面, 与镜像原先 lightdm autologin-user=root 的行为一致。
+# 注意: 光写这里还不够 —— /etc/pam.d/gdm-password 的 user != root 规则
+# 会让自动登录静默失败, 已由同一个脚本放开。
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=root
+CONF
+	log "已写入 $GDM_CONF"
+else
+	log "$GDM_CONF 已有自动登录配置, 跳过"
+fi
+
+AS=/var/lib/AccountsService/users/root
+if ! grep -q '^AutomaticLoginEnable=true' "$AS" 2>/dev/null; then
+	mkdir -p "$(dirname "$AS")"
+	cat > "$AS" <<'CONF'
+[User]
+AutomaticLoginEnable=true
+AutomaticLogin=1
+CONF
+	chmod 644 "$AS"
+	log "已写入 $AS"
+fi
+
+# ------------------------------------------- 3. 显示管理器只能是 gdm3
+# 仓库里 config/desktop/buster/environments/gnome/config_base/packages 只列了
+# gdm3, 但历史上装过 armbian-bookworm-desktop-xfce, 而它依赖 lightdm,
+# 于是 lightdm 被一起装进来并且抢先接管了会话。gnome 的
+# create_desktop_package.sh 开头就写着这个坑, 这里再兜一次底。
+if dpkg-query -W -f='${Status}' lightdm 2>/dev/null | grep -q "install ok installed"; then
+	log "检测到 lightdm 仍安装, 停用并屏蔽"
+	systemctl disable lightdm >/dev/null 2>&1
+	systemctl mask lightdm >/dev/null 2>&1
+else
+	log "lightdm 未安装, 无需处理"
+fi
+
+systemctl enable gdm3 >/dev/null 2>&1 && log "gdm3 已 enable" || log "gdm3 enable 失败 (不致命)"
+
+# 只重载配置, 不重启 gdm3 —— 本服务跑在 display-manager 之前, gdm3 还没起来,
+# 它自己启动时会读新的配置。
+systemctl daemon-reload >/dev/null 2>&1
+
+log "完成"
+exit 0

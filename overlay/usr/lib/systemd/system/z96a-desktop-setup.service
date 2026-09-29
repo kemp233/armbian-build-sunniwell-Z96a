@@ -1,0 +1,22 @@
+[Unit]
+# 必须在 display-manager 之前跑完: PAM 和 gdm3 配置都赶在 gdm3 启动前落地。
+# DefaultDependencies=no 让它能在 display-manager 之前启动, 而 display-manager
+# 本身是 graphical.target 拉起的。
+Description=Z96A: 让 gdm3 当显示管理器并让 root 自动登录 (偏色/无声音的根因修复)
+Documentation=file:///usr/lib/armbian/z96a-desktop-setup
+DefaultDependencies=no
+After=local-fs.target
+Before=display-manager.service getty@tty1.service
+ConditionPathExists=/usr/lib/armbian/z96a-desktop-setup
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# 脚本内部全程不 set -e 且以 exit 0 收尾, 这里再加一层保险:
+# 桌面修不好顶多退回 X11, 绝不能把机器卡在开不了机。
+ExecStart=/usr/lib/armbian/z96a-desktop-setup
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
