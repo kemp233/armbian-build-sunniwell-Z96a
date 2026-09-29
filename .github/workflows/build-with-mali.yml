@@ -1097,6 +1097,17 @@ jobs:
           else
             echo "MPP 已就绪, 跳过"
           fi
+          # MPP 的 .pc 刚落地, 必须先刷新 BUILD_PC 再断言 —— run 36590900889
+          # 的教训: MPP 装得好好的, 断言却找不到, 因为 PKG_CONFIG_PATH 里只有
+          # step 开头生成的空镜像, 原始 pkgconfig 目录刻意不在搜索路径里。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+                   "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig"
+          find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+               "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+               -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+            sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+          done
+          echo "  BUILD_PC 镜像: $(ls "$BUILD_PC" | tr '\n' ' ')"
           # FFmpeg configure 靠 pkg-config 找 MPP (版本断言), 头文件和链接
           # 路径由上面的 CFLAGS/LDFLAGS + BUILD_PC 镜像提供。
           if ! pkg-config --exists 'rockchip_mpp >= 1.3.9'; then
