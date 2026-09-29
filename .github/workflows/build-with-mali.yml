@@ -558,6 +558,15 @@ jobs:
 
       - name: Verify complete customizations and accelerator inputs
         run: |
+          # 全量 transcript 落盘。理由: `gh api .../actions/jobs/<id>/logs`
+          # 返回的文本**是残缺的** —— 2026-09-29 连续三次红, 每次拿到的日志
+          # 都从脚本中段才开始 (开头的 assert_exists 回显整段消失), 退出点
+          # 前面最后一条命令和退出点之间隔着几十行断言, 靠它推是推不出来的
+          # (前两次就是这么猜错的)。stdout/stderr 还会被 GitHub 按块缓冲
+          # 丢弃, 所以既不能只靠 stdout, 也不能只靠 stderr。
+          # tee 到文件是唯一拿得到完整原文的办法, 失败时由下面的
+          # always() 步骤上传。
+          exec > >(tee "$RUNNER_TEMP/verify-transcript.txt") 2>&1
           set -euo pipefail
           KCONFIG="config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
           BOARD_CONFIG="config/boards/z96a-v2.conf"
@@ -792,6 +801,26 @@ jobs:
           echo '偏色 (gdm3/Wayland) 与音频 (pipewire) 修复的形状已校验'
 
           echo 'Complete customizations and accelerator inputs verified'
+
+      - name: Upload verify transcript
+        if: always()
+        run: |
+          # verify 失败时这才是唯一完整的现场: 哪个断言、哪条消息、哪一行。
+          if [ -s "$RUNNER_TEMP/verify-transcript.txt" ]; then
+            echo "--- transcript 末尾 60 行 ---"
+            tail -n 60 "$RUNNER_TEMP/verify-transcript.txt"
+          else
+            echo "没有 transcript 文件: verify 步骤没跑到写文件那一步"
+          fi
+
+      - name: Upload verify transcript artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-transcript
+          path: ${{ runner.temp }}/verify-transcript.txt
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Free disk space
         uses: jlumbroso/free-disk-space@v1.3.1
