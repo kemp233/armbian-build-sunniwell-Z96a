@@ -39,8 +39,8 @@ network-manager-openvpn-gnome
 pavucontrol
 printer-driver-all
 profile-sync-daemon
-pulseaudio
-pulseaudio-module-bluetooth
+pipewire-audio
+pulseaudio-utils
 software-properties-gtk
 synaptic
 system-config-printer
