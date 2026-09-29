@@ -34,3 +34,6 @@ Dockerfile
 fix-gpu-driver.sh
 push-to-actions.sh
 build-and-verify-gpu.sh
+
+# 本地留的旧 eglfix 源码备份, 不该进仓库也不该进构建 artifact
+custom/extensions/z96a-eglfix-client.c.bak
