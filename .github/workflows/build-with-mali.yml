@@ -1310,16 +1310,31 @@ jobs:
           # ==================================================================
           # 二、rockchip-gstreamer-mpp
           # ==================================================================
-          # 上游是 rockchip-linux/gstreamer-rockchip。这里用的是 resi-labs 的
-          # 分支, 而它的 README 把话说死了 —— 这是个**因为 DMCA 被阉割**的
-          # 版本:
-          #   "does not support decoding of the following codecs:
-          #    AV1, H.265, VP9"
-          # 也就是说它只能解 H.264。B站/YouTube 现在大量用 HEVC, 所以拿它
-          # 当解码器基本没用。之所以还是编进去: 它能编 H.265, 而且别的用户态
-          # (浏览器/GStreamer 应用) 也许要用。但 **mpv 永远走不到这里** ——
-          # mpv 只用 libav*, 不经过 gstreamer, 播视频靠的是 FFmpeg 那条
-          # rkmpp 通路。别把这个插件的成败当成硬解的成败。
+          # 解码器换成 BoxCloudIRL 的 gstreamer-rockchip。
+          #
+          # 换掉 resi-labs 那份的唯一原因: 它是**因为 DMCA 被阉割**的分支,
+          # README 写明不解 AV1 / H.265 / VP9, 只能解 H.264。而 B站和
+          # YouTube 现在大量用 HEVC, 只解 H.264 的解码器基本没用。
+          # 我逐行对比过两边的 gst_mpp_video_dec_get_mpp_type(), 差别就是
+          # resi-labs 删掉的三行:
+          #     video/x-h265  -> MPP_VIDEO_CodingHEVC
+          #     video/x-av1   -> MPP_VIDEO_CodingAV1
+          #     video/x-vp9   -> MPP_VIDEO_CodingVP9
+          # BoxCloudIRL 这三行都在, 并且和 sink pad 的 caps 模板
+          # (gstmppvideodec.c:65-69) 一致 —— 不是只写了个声明。
+          # meson_options.txt 两边逐字相同, 所以下面的 -D 参数照搬即可。
+          #
+          # 两点必须心里有数:
+          #   1. 这个仓库是给 **RK3588** 写的 (debian/control 里明写),
+          #      而 3588 有 AV1 硬解, **3568 没有**。所以 video/x-av1 这个
+          #      分支在这块板子上运行时会被 MPP 拒绝 (MPP_ERR_NOT_PERMIT),
+          #      属于预期, 不是构建失败。
+          #   2. 它的 encoder 只有 mppvp8enc/mpph264enc/mpph265enc/mppjpegenc,
+          #      比 resi-labs 那份**少一个 H.265 编码器**。解码补全, 编码略减。
+          #
+          # 再次强调: **mpv 永远走不到这里**。mpv 只用 libav*, 播视频靠的是
+          # FFmpeg 那条 rkmpp 通路(已在板子上实测 8.5% CPU)。换这个插件
+          # 对 mpv 播放没有任何影响, 别把它的成败当成硬解的成败。
           #
           # 依赖问题: 它要 librockchip-mpp-dev, 而 Ubuntu noble 没有这个包。
           # 镜像里的 MPP 是 custom/extensions/rockchip-multimedia.sh 从源码
@@ -1358,12 +1373,34 @@ jobs:
             find "$MPP_PREFIX" -name '*.pc' -o -name 'librockchip_mpp*' | head -10
           fi
 
-          git clone --depth 1 \
-            https://github.com/resi-labs/rockchip-gstreamer-mpp.git gst-rockchip
+          # 钉死 commit 而不是跟 default 分支: 这个仓库没有 tag, default 分支
+          # 一动, 镜像里的编解码能力就跟着变, 而 CI 不会告诉你。
+          GST_MPP_URL=https://github.com/BoxCloudIRL/gstreamer-rockchip.git
+          GST_MPP_COMMIT="$(git ls-remote "$GST_MPP_URL" HEAD | cut -f1)"
+          echo "gstreamer-rockchip 固定到 commit $GST_MPP_COMMIT"
+          git clone --depth 1 "$GST_MPP_URL" gst-rockchip
           cd gst-rockchip
+          git fetch -q --depth 1 origin "$GST_MPP_COMMIT"
+          git checkout -q "$GST_MPP_COMMIT"
+          # 换了源就必须重新确认那三个解码分支还在。clone 到的是 shallow
+          # HEAD, 拿到的是哪一版由上面那个 SHA 决定 —— 断言在这里兜底。
+          DEC_SRC=gst/rockchipmpp/gstmppvideodec.c
+          for pair in \
+            'video/x-h265:MPP_VIDEO_CodingHEVC' \
+            'video/x-av1:MPP_VIDEO_CodingAV1' \
+            'video/x-vp9:MPP_VIDEO_CodingVP9' ; do
+            fmt="${pair%%:*}"; sym="${pair##*:}"
+            if ! grep -q "$fmt" "$DEC_SRC" || ! grep -q "$sym" "$DEC_SRC"; then
+              echo "断言失败: 解码器缺少 $fmt -> $sym —— 换源后退化回只有 H.264 了"
+              exit 1
+            fi
+            echo "  解码分支在: $fmt -> $sym"
+          done
+          grep -n 'video/x-h265\|video/x-av1\|video/x-vp9' "$DEC_SRC" | head -6
           # 这份 meson.build 是从 gst-plugins-bad 整份 fork 来的, 不关掉
           # auto_features 的话会连着把 bad 插件的几十个无关组件一起编,
           # 光那部分就要几十分钟。只要 rockchipmpp 这一个。
+          # meson_options.txt 与 resi-labs 版逐字相同, 参数直接照搬。
           meson setup build \
             -Dauto_features=disabled \
             -Drockchipmpp=enabled \
