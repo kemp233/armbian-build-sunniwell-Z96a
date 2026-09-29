@@ -426,6 +426,14 @@ jobs:
 
           # Keep the newer root board/kernel configuration, while bringing in
           # the custom-only Z96A family, boot, optional, and extension files.
+          #
+          # "boards" and "kernel" are deliberately NOT in this list. The
+          # authoritative copies are the repo's own config/boards/ and
+          # config/kernel/, which were already rsync'd above by the first loop.
+          # custom/config/boards/z96a-v2.conf is a historical dead copy pinned to
+          # rk-6.1-rkr5.1 (= 6.1.115) and has drifted 130 lines away; merging it
+          # would silently shadow the real one. Only the legacy pipeline
+          # (complete-artifact-one-by-one.yml -> action.yml) reads that copy.
           for dir in bootscripts bootenv sources optional; do
             if [ -d "armbian-custom/custom/config/$dir" ]; then
               mkdir -p "custom/config/$dir"
@@ -550,6 +558,14 @@ jobs:
           grep -qx 'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP=y' "$KCONFIG"
           grep -q 'CONFIG_USB_NET_AX88179_178A' "$BOARD_CONFIG"
           grep -q 'CONFIG_RTL8852BU' "$BOARD_CONFIG"
+          # rkvdec@fdf80200 的 compatible 是 rockchip,rkv-decoder-rk3568, 这棵树里
+          # 只有 mpp_rkvdec2.c 认它。关掉 CONFIG_ROCKCHIP_MPP_RKVDEC2 -> 节点无人
+          # 绑定 -> mpp_service 不注册 VPU_CLIENT_RKVDEC -> 用户态报
+          # "client 9 driver is not ready!" -> hwdec 静默退回软解, 四个 A55 跑满。
+          # 2026-09-28 的 b89863e41 修的是 custom/config/boards/ 那份死副本, 本
+          # workflow 根本不取, 所以修复从未进入镜像。板子配置只认 $BOARD_CONFIG。
+          grep -q 'kernel_config_set_y CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
+          ! grep -qE 'kernel_config_set_n[[:space:]]+CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
           grep -qi '0x0*b832' "$RTL_PATCH"
           grep -qi '0x0*b833' "$RTL_PATCH"
           grep -q 'MODULE_NAME = 8852bu' "$RTL_PATCH"
