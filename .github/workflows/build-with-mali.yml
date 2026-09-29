@@ -643,8 +643,32 @@ jobs:
               exit 1
             fi
           done
-          test -x packages/bsp/common/usr/lib/armbian/armbian-apt-updates
-          test -x packages/blobs/splash/bootsplash-packer
+          # 这两个**不能**用 test -x 来验。verify 步骤面对的工作区是 artifact
+          # 解包还原出来的, 而 GitHub 的 upload/download-artifact 走 zip 传输,
+          # 不保留 Unix 权限位 —— 解出来的东西一律 0644。上游那个 chmod 恢复
+          # 循环 (见 "restored exec bit" 那段) 是尽力而为, 它按 z96a-repo 的
+          # git 索引逐个 chmod, 一旦某一步没落到这个文件上, 这里就会误报,
+          # 而 set -e 下报错行只有一条 test -x, 看不出到底是权限没恢复还是
+          # 文件根本不在。
+          #
+          # 可执行位的权威来源是 git 索引里的模式位 —— build 阶段真正拿来
+          # exec 的是从 git checkout 出来的文件, 判它就该判索引, 不该判
+          # 一个经过 zip 往返的临时副本。同时把实际权限打出来: 真出问题时
+          # 这一行就是现场证据, 不用再去猜。
+          for exe in \
+            packages/bsp/common/usr/lib/armbian/armbian-apt-updates \
+            packages/blobs/splash/bootsplash-packer ; do
+            assert_exists "$exe"
+            echo "  实际权限: $(stat -c '%A' "$exe") $exe"
+            mode="$(git -C z96a-repo ls-files -s -- "$exe" | cut -d' ' -f1)"
+            if [ "$mode" = "100755" ]; then
+              echo "  git 索引: $mode (可执行) $exe"
+            else
+              echo "断言失败: $exe 在 git 索引里的模式是 '$mode', 不是 100755" >&2
+              echo "  build 阶段会 exec 它, 索引里不是可执行就是 Permission denied" >&2
+              exit 1
+            fi
+          done
 
           # 逐条报出是哪一条不满足, 而不是让第一条失败就把后面的全吞掉 ——
           # set -e 下一条 grep -qx 失败, 日志里既没有断言消息也没有文件名。
