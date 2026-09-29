@@ -1000,19 +1000,26 @@ jobs:
           mkdir -p "$WORK"
 
           # ---- 构建依赖 -------------------------------------------------
+          # 包名以 **Ubuntu noble (arm64 runner)** 为准, 不是 Debian:
+          #   - `libglslang-dev` 在 noble 不存在, 是 `glslang-dev`
+          #     (run 36559657755 就死在 "Unable to locate package
+          #     libglslang-dev", 退出码 100)
+          #   - `libfreetype6-dev` 在 noble 也没有, 是 `libfreetype-dev`
+          # 每个包都对着 Launchpad noble/arm64 的索引查过再写进来, 别照搬
+          # Debian 的名字。
           # libplacebo 的依赖最容易漏: 少 libxxf86vm-dev 就在 meson 那里
           # "x11present not found", 少 shaderc/glslang 就在链接那里炸。
           sudo apt-get install -y --no-install-recommends \
             nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
             python3-mako python3-jinja2 \
             libssl-dev \
-            libvulkan-dev libshaderc-dev libglslang-dev \
+            libvulkan-dev libshaderc-dev glslang-dev \
             libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libdrm-dev \
             libx11-dev libxrandr-dev libxcb1-dev libxcb-dri2-0-dev \
             libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev \
             libxcb-xfixes0-dev libxxf86vm-dev libxext-dev libxfixes-dev \
             wayland-protocols libxkbcommon-dev libwayland-dev \
-            libass-dev libfreetype6-dev libharfbuzz-dev libfribidi-dev \
+            libass-dev libfreetype-dev libharfbuzz-dev libfribidi-dev \
             libvorbis-dev libopus-dev libopusfile-dev \
             libflac-dev libmpg123-dev libspeex-dev
 
@@ -1065,63 +1072,76 @@ jobs:
           echo "FFmpeg rkmpp 硬解: 已启用"
           cd "$WORK"
 
-          # ---- shaderc.pc 修正 -----------------------------------------
-          # Debian/Ubuntu 的 libshaderc.so 链接不上: glslang 只发静态库,
-          # 而 shaderc.pc 里既没列 glslang, 也没 -lstdc++ / -lm, 静态库顺序
-          # 还是错的。结果是 libplacebo 一链接就报三十多个 glslang 符号
-          # 未定义。这不是我们配置错了, 是发行版的 .pc 文件本身残缺。
-          found_lib=0
-          for lib in libglslang.a libMachineIndependent.a libOSDependent.a \
-                     libHLSL.a libOGLCompiler.a libGenericCodeGen.a \
-                     libSPVRemapper.a libSPIRV.a libSPIRV-Tools.a \
-                     libSPIRV-Tools-link.a libSPIRV-Tools-opt.a; do
-            if find /usr/lib -name "$lib" -print -quit 2>/dev/null | grep -q .; then
-              found_lib=$((found_lib+1))
-            else
-              echo "断言失败: 找不到 $lib —— glslang/SPIRV 静态库布局和预期不符"
-              find /usr/lib -name 'libglslang*' -o -name 'libSPIRV*' 2>/dev/null | head -20
-              exit 1
-            fi
-          done
-          echo "glslang/SPIRV 静态库齐全: $found_lib 个"
+          # ---- shaderc 链接 --------------------------------------------
+          # 在 Debian bookworm 上, 修法是: 自己拼一份 .pc, 把 glslang 的
+          # 一串静态库按依赖顺序列全。**这个修法在 noble 上是死路**:
+          #   - glslang 15 把 libHLSL/libOGLCompiler 合并进了 libglslang
+          #   - noble 根本没有 libspirv-tools-dev —— spirv.pc 的
+          #     `Requires: SPIRV-Tools` 无从满足, glslang 路线走不通
+          # 所以这里改走**发行版的 libshaderc.so.1**: Ubuntu 构建它时已经把
+          # glslang 和 SPIRV-Tools 静态打进了这一个 .so (libshaderc1 只依赖
+          # libc/libgcc/libstdc++, 没有 libglslang 依赖, 就是证据)。
+          # 这是 noble 上唯一可行的 shaderc 链接方式, 也是 libplacebo 必须
+          # 钉死 `-Dshaderc=enabled -Dglslang=disabled` 的原因。
+          #
+          # noble 的发行版 bug 照样要补: libshaderc-dev 只发 libshaderc.a /
+          # libshaderc_combined.a (而且 combined.a 并不自包含, spvtools:: 符号
+          # 全是未定义引用), `shaderc.pc` 却写 `-lshaderc` —— 而 libshaderc.so
+          # 这个符号链接谁都不发, 发 .so.1 的 libshaderc1 是运行时包。链接器
+          # 找不到 -lshaderc。自己补上这个符号链接。
+          if [ ! -e /usr/lib/aarch64-linux-gnu/libshaderc.so.1 ]; then
+            echo "断言失败: /usr/lib/aarch64-linux-gnu/libshaderc.so.1 不存在"
+            echo "  libshaderc1 是 libshaderc-dev 的依赖, 不该缺。检查 apt 源。"
+            exit 1
+          fi
+          ln -sf libshaderc.so.1 /usr/lib/aarch64-linux-gnu/libshaderc.so
+          echo "已补 libshaderc.so -> libshaderc.so.1 符号链接"
           mkdir -p /usr/local/lib/pkgconfig
-          # 顺序有讲究: libSPIRV 引用 libSPIRV-Tools, 而 spvtools::Optimizer
-          # 在 libSPIRV-Tools-opt 里, 单遍链接必须"被引用的排在前面"。
-          # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
-          # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
           {
-            echo 'prefix=/usr/local'
-            echo 'exec_prefix=${prefix}'
-            echo 'libdir=${prefix}/lib'
-            echo 'includedir=${prefix}/include'
+            echo 'prefix=/usr'
+            echo 'libdir=/usr/lib/aarch64-linux-gnu'
+            echo 'includedir=/usr/include'
             echo ''
             echo 'Name: shaderc'
-            echo 'Description: GLSL to SPIR-V compiler'
-            echo 'Version: 2023.5'
-            echo 'Libs: -L${libdir} -lshaderc_combined -lglslang -lMachineIndependent -lOSDependent -lHLSL -lOGLCompiler -lGenericCodeGen -lSPVRemapper -lSPIRV -lSPIRV-Tools-opt -lSPIRV-Tools -lSPIRV-Tools-link -lpthread -lstdc++ -lm'
+            echo 'Description: GLSL to SPIR-V compiler (shared, glslang+spvtools 已静态内含)'
+            echo 'Version: 2023.8'
+            echo 'Libs: -L${libdir} -lshaderc -lpthread -lstdc++ -lm'
             echo 'Cflags: -I${includedir}'
           } > /usr/local/lib/pkgconfig/shaderc.pc
-          # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
-          # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
-          {
-            echo 'prefix=/usr/local'
-            echo 'libdir=${prefix}/lib'
-            echo ''
-            echo 'Name: glslang-default-resource-limits'
-            echo 'Description: glslang default resource limits'
-            echo 'Version: 12.0.0'
-            echo 'Libs: -L${libdir} -lglslang-default-resource-limits'
-          } > /usr/local/lib/pkgconfig/glslang-default-resource-limits.pc
+          # 用覆盖后的 .pc 实际链接一次, 骗不了人: 找不到符号当场死。
+          printf 'int main(void){return 0;}\n' > /tmp/shc-test.c
+          if ! gcc /tmp/shc-test.c $(pkg-config --cflags --libs shaderc) -o /tmp/shc-test 2>/tmp/shc-test.err; then
+            echo "断言失败: shaderc.pc 链接测试失败 —— .pc 内容和实际库对不上"
+            cat /tmp/shc-test.err | head -15
+            exit 1
+          fi
+          echo "shaderc.pc 链接测试通过"
           export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
           ldconfig
 
           # ---- libplacebo ----------------------------------------------
+          # shaderc 必须显式 enabled、glslang 必须显式 disabled。两者都是
+          # auto 的话, 探测结果取决于 meson 找 .pc 的顺序 —— 而 noble 上
+          # glslang 路线 (spirv.pc Requires SPIRV-Tools) 是断的, 一旦 meson
+          # 选中它, 死法就是链接时一堆 spvtools 符号未定义。
           git clone --depth 1 --branch "$LIBPLACEBO_TAG" \
             https://github.com/haasn/libplacebo.git libplacebo
           cd libplacebo
           meson setup build --buildtype=release -Denable_tests=false \
-            -Denable_demos=false
+            -Denable_demos=false \
+            -Dshaderc=enabled -Dglslang=disabled
+          # 装完当场验: shaderc 路线的源文件 spirv_shaderc.c 只有在
+          # shaderc.found() 时才会进 sources (src/glsl/meson.build), 编出
+          # 它的 .o 就是"真的走的 shaderc"的铁证。
           meson compile -C build
+          if ! find build -name 'spirv_shaderc*.o' | grep -q .; then
+            echo "断言失败: libplacebo 没有编译 spirv_shaderc —— shaderc 路线没生效"
+            echo "  (glslang 路线在 noble 上是断的: 没有 SPIRV-Tools.pc)"
+            echo "  meson-log 里 shaderc/glslang 的探测结果:"
+            grep -iE 'shaderc|glslang' build/meson-logs/meson-log.txt | tail -8 || true
+            exit 1
+          fi
+          echo "libplacebo 走的 shaderc 路线 (spirv_shaderc.o 已编出)"
           meson install -C build
           ldconfig
           cd "$WORK"
@@ -1190,6 +1210,12 @@ jobs:
           if [ -d /usr/local/lib/pkgconfig ]; then
             cp -a /usr/local/lib/pkgconfig/. "$STAGE/usr/local/lib/pkgconfig/"
           fi
+          # libshaderc.so.1 也必须进 stage: libplacebo 链的是发行版这个库,
+          # 而镜像里**不会** apt 装 libshaderc1 (bookworm 的镜像, 包名都
+          # 对不上)。跟着 /usr/local/lib 走, 由下面的 ld.so.conf 接管查找。
+          # glslang 和 SPIRV-Tools 已静态打进这个 .so, 带这一个就够。
+          cp -a /usr/lib/aarch64-linux-gnu/libshaderc.so.1 \
+                "$STAGE/usr/local/lib/libshaderc.so.1"
 
           # ldconfig 必须知道去这两个地方找, 否则 mpv 一跑就
           # "error while loading shared libraries: libplacebo.so.338"
@@ -1272,6 +1298,28 @@ jobs:
             exit 1
           fi
           echo "  有: libavcodec"
+          if [ ! -e "$STAGE/usr/local/lib/libshaderc.so.1" ]; then
+            echo "断言失败: stage 里没有 libshaderc.so.1 —— libplacebo 在镜像里会加载失败"
+            exit 1
+          fi
+          echo "  有: libshaderc.so.1"
+          # 终极断言: 逐个用 ldd 过一遍会进镜像的动态库和可执行文件,
+          # 任何 "not found" 都意味着镜像里一跑就挂。镜像里唯一的库路径
+          # 是 /usr/local/lib + /usr/local/lib/aarch64-linux-gnu
+          # (zz-armbian-local.conf) 加上发行版自己的库, ldd 在 runner 上
+          # 解析不了发行版路径之外的, 所以把 STAGE 两个目录也挂进查找路径。
+          echo "=== ldd 全量核对 ==="
+          export LD_LIBRARY_PATH="$STAGE/usr/local/lib:$STAGE/usr/local/lib/aarch64-linux-gnu:${LD_LIBRARY_PATH:-}"
+          for f in "$STAGE"/usr/local/bin/mpv "$STAGE"/usr/local/bin/ffmpeg \
+                   "$STAGE"/usr/local/lib/aarch64-linux-gnu/libplacebo.so*; do
+            MISS=$(ldd "$f" 2>&1 | grep 'not found' || true)
+            if [ -n "$MISS" ]; then
+              echo "断言失败: $f 有解析不了的动态依赖:"
+              echo "$MISS"
+              exit 1
+            fi
+          done
+          echo "  ldd 全部可解析"
           echo "mpv/ffmpeg/libplacebo 已备好, 待随镜像装入"
 
       - name: Build mpv-handler + rockchip-gstreamer-mpp (native ARM64)
@@ -1369,10 +1417,27 @@ jobs:
           # 构建镜像时才跑的, 而这一步在它之前。所以这里为了让 configure 过,
           # 临时自己编一份 MPP —— **只用来链接, 不进 stage**, 避免镜像里
           # 出现两份 MPP 互相踩。版本钉死成一样的 1.1.0, soname 对得上。
+          # 注意: **不能**把 librga-dev 也塞进这条命令再加 || true。
+          # apt 安装是原子的 —— 列表里任何一个包定位不到, 整条命令一个都
+          # 不装, 而 || true 会把这个失败吞掉, 直到 meson setup 报
+          # "gstreamer-1.0 dependency not found" 才暴露, 中间隔着几分钟,
+          # 根本看不出是包没装上。librga-dev 在 noble/arm64 上不存在
+          # (Launchpad 索引确认), 而下面 meson 本来就 -Drga=disabled,
+          # 顶层 meson.build 对 disabled 的 required:false 依赖会干净跳过,
+          # 所以直接不装。
+          # 这些是插件编译的硬依赖, 失败就该当场红。
           sudo apt-get install -y --no-install-recommends \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libgstreamer-plugins-bad1.0-dev \
-            libx11-dev libdrm-dev librga-dev || true
+            libx11-dev libdrm-dev
+          # 装没装上, 当场验, 不留给 meson 的报错去猜
+          for p in gstreamer-1.0 gstreamer-plugins-base-1.0 gstreamer-plugins-bad-1.0 libdrm; do
+            if ! pkg-config --exists "$p"; then
+              echo "断言失败: pkg-config 找不到 $p —— apt 安装没生效"
+              exit 1
+            fi
+          done
+          echo "gstreamer 开发包齐了"
 
           # MPP 头文件和 .pc 装到 /usr/local/mpp-prefix, 和系统路径隔离,
           # 编完直接删, 不污染 runner 也不进镜像。
