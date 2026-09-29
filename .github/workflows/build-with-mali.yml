@@ -1062,6 +1062,12 @@ jobs:
           # 全部指对。
           BUILD_PC="$PWD/.pc-build"
           mkdir -p "$BUILD_PC"
+          # find 的起始路径必须先 exist: 目录不存在时 find 返回 1,
+          # 2>/dev/null 只藏报错不藏退出码, pipefail + set -e 会无声杀死
+          # 整个 step —— run 36581861684 就这么死在 apt 装完之后, 日志里
+          # 一个字都没有。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+                   "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig"
           find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
                "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
                -name '*.pc' 2>/dev/null | while IFS= read -r f; do
@@ -1202,6 +1208,12 @@ jobs:
           } > "$INSTALL_ROOT/usr/local/lib/pkgconfig/shaderc.pc"
           # MPP/ffmpeg 的 DESTDIR 安装发生在上面, 此刻才有 .pc 可镜像 ——
           # 刷新 BUILD_PC, 否则链接测试找不到刚装的库。
+          # find 的起始路径必须先 exist: 目录不存在时 find 返回 1,
+          # 2>/dev/null 只藏报错不藏退出码, pipefail + set -e 会无声杀死
+          # 整个 step —— run 36581861684 就这么死在 apt 装完之后, 日志里
+          # 一个字都没有。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+                   "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig"
           find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
                "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
                -name '*.pc' 2>/dev/null | while IFS= read -r f; do
@@ -1242,6 +1254,12 @@ jobs:
           DESTDIR="$INSTALL_ROOT" meson install -C build
           cd "$WORK"
           # libplacebo.pc 刚落地, 刷新 BUILD_PC, mpv 才能链接到它。
+          # find 的起始路径必须先 exist: 目录不存在时 find 返回 1,
+          # 2>/dev/null 只藏报错不藏退出码, pipefail + set -e 会无声杀死
+          # 整个 step —— run 36581861684 就这么死在 apt 装完之后, 日志里
+          # 一个字都没有。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+                   "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig"
           find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
                "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
                -name '*.pc' 2>/dev/null | while IFS= read -r f; do
@@ -1551,6 +1569,12 @@ jobs:
           INSTALL_ROOT="$PWD/.local-root"
           BUILD_PC="$PWD/.pc-build"
           mkdir -p "$BUILD_PC"
+          # find 的起始路径必须先 exist: 目录不存在时 find 返回 1,
+          # 2>/dev/null 只藏报错不藏退出码, pipefail + set -e 会无声杀死
+          # 整个 step —— run 36581861684 就这么死在 apt 装完之后, 日志里
+          # 一个字都没有。
+          mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+                   "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig"
           find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
                "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
                -name '*.pc' 2>/dev/null | while IFS= read -r f; do
