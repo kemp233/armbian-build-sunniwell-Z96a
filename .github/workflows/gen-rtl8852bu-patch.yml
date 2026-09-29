@@ -1,5 +1,13 @@
 name: "Generate RTL8852BU (USB WiFi) kernel driver patch"
 
+# 已作废 (2026-09-29): 这个 workflow 生成
+# patch/kernel/rockchip-rk3568-z96a/legacy/0002-wifi-add-rtl8852bu-driver-for-z96a.patch,
+# 但该驱动连同另外 8 个 Z96A 修复已经并进 kemp233/linux-rockchip 的 rk-6.1-rkr7.2
+# 分支 (commit c16c640e45a9), 板配置的 KERNELBRANCH 直接指向那个分支, 不再走补丁。
+# 再跑一次会把一份和内核树重复的补丁塞回 legacy/, 而 build-with-mali.yml 现在
+# 断言那里没有任何 .patch —— 结果是把 CI 弄红, 而不是修好什么。
+# 要改 8852bu 驱动, 直接在 linux-rockchip 分支上提交。
+#
 # Builds the 0002-wifi-add-rtl8852bu-driver-for-z96a.patch board patch on the
 # runner (no local machine needed): assembles morrownr/rtl8852bu-20250826 into
 # a kemp233/linux-rockchip rk-6.1-rkr5.1 tree, wires Kconfig/Makefile, exports

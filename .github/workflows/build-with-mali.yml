@@ -514,7 +514,6 @@ jobs:
           set -euo pipefail
           KCONFIG="config/kernel/linux-rockchip-rk3568-z96a-legacy.config"
           BOARD_CONFIG="config/boards/z96a-v2.conf"
-          RTL_PATCH="patch/kernel/rockchip-rk3568-z96a/legacy/0002-wifi-add-rtl8852bu-driver-for-z96a.patch"
           UBOOT_PATCH="patch/u-boot/legacy/board_z96a-v2"
           PATCH_CONFIG="patch/kernel/rockchip-rk3568-z96a/legacy/0000.patching_config.yaml"
           CHARGER="patch/kernel/rockchip-rk3568-z96a/legacy/drivers/power/supply/sc8886s_charger.c"
@@ -524,7 +523,6 @@ jobs:
 
           test -f "$KCONFIG"
           test -f "$BOARD_CONFIG"
-          test -f "$RTL_PATCH"
           test -f "$PATCH_CONFIG"
           test -f "$CHARGER"
           test -f "$MULTIMEDIA"
@@ -566,9 +564,15 @@ jobs:
           # workflow 根本不取, 所以修复从未进入镜像。板子配置只认 $BOARD_CONFIG。
           grep -q 'kernel_config_set_y CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
           ! grep -qE 'kernel_config_set_n[[:space:]]+CONFIG_ROCKCHIP_MPP_RKVDEC2' "$BOARD_CONFIG"
-          grep -qi '0x0*b832' "$RTL_PATCH"
-          grep -qi '0x0*b833' "$RTL_PATCH"
-          grep -q 'MODULE_NAME = 8852bu' "$RTL_PATCH"
+          # Z96A 的 9 个内核修复已经并进 kemp233/linux-rockchip 的 rk-6.1-rkr7.2
+          # 分支 (commit c16c640e45a9), 而板配置的 KERNELBRANCH 直接指向那个
+          # 分支, 所以这里不再打任何内核补丁。legacy/ 下只应剩下:
+          #   0000.patching_config.yaml  —— 提供 dt/ 的 dts-directories 拷贝机制
+          #   dt/  和 drivers/             —— 板级数据, 原样拷贝, 不是补丁
+          # 再往这里塞 .patch 就是"同一处代码存在两份", 迟早有一份不生效。
+          ! find patch/kernel/rockchip-rk3568-z96a/legacy -maxdepth 1 -name '*.patch' | grep -q .
+          test -d patch/kernel/rockchip-rk3568-z96a/legacy/dt
+          grep -q 'dts-directories' "$PATCH_CONFIG"
           test ! -e patch/kernel/rockchip-rk3568-z96a/legacy/z96a-rk817.patch
           echo 'Complete customizations and accelerator inputs verified'
 
