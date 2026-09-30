@@ -1254,8 +1254,17 @@ jobs:
           git clone --depth 1 --branch "$LIBPLACEBO_TAG" \
             https://github.com/haasn/libplacebo.git libplacebo
           cd libplacebo
-          meson setup build --buildtype=release -Denable_tests=false \
-            -Denable_demos=false \
+          # 选项名是 demos/tests/**不带 enable_ 前缀**。run 36651322478
+          # 就死在这: meson 1.3.2 直接报
+          #   meson.build:1:0: ERROR: Unknown options: "enable_demos, enable_tests"
+          # enable_ 前缀是 libplacebo v2.x(2021 年前后)的老名字, 连 4.x
+          # 的 meson_options.txt 都没有 —— 也就是说这两个 flag 从写下来
+          # 那天起就没对过任何一个 libplacebo 版本, 只是之前几轮都死在
+          # 到达这一行之前, 从没被 meson 读到过。meson 对未知选项是硬错,
+          # 不是警告, 所以它一直没能"顺便编过"。
+          # meson_version 要求 >= 0.63, runner 自带 1.3.2, 够。
+          meson setup build --buildtype=release -Dtests=false \
+            -Ddemos=false \
             -Dshaderc=enabled -Dglslang=disabled
           # 装完当场验: shaderc 路线的源文件 spirv_shaderc.c 只有在
           # shaderc.found() 时才会进 sources (src/glsl/meson.build), 编出
