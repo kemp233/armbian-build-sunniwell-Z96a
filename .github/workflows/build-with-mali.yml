@@ -1011,7 +1011,6 @@ jobs:
           docker run --rm -v "$PWD:/work" -w /work \
             -e DEBIAN_FRONTEND=noninteractive \
             debian:bookworm bash /work/scripts/z96a/build-mpv-stack.sh
-      - name: Build mpv-handler + rockchip-gstreamer-mpp (native ARM64)
       - name: Build mpv-handler + rockchip-gstreamer-mpp (bookworm 容器)
         if: github.event.inputs.armbian_target != 'kernel'
         run: |
