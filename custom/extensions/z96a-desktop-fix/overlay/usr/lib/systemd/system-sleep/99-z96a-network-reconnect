@@ -1,0 +1,17 @@
+#!/bin/bash
+# RTL8821CS 唤醒后偶发收不到 DHCP 广播回包, NM 的 dhcp4 事务 45s 超时
+# —— 表现为睡一觉起来 IPv4 没了、IPv6 正常 (v6 地址内核保留, SLAAC 自续,
+# 日志里 dhcp6 秒拿租约而 dhcp4 超时, 板上 journal 实测)。
+# 唤醒后给驱动几秒稳定, 若仍无 v4 就强制 NM 重连, 最多试 3 轮。
+[ "$1" = "post" ] || exit 0
+sleep 3
+for i in 1 2 3; do
+  DEV=$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null \
+        | awk -F: '$2=="wifi" && $1 !~ /^p2p/ {print $1}' | head -1)
+  [ -z "$DEV" ] && exit 0
+  ip -4 addr show dev "$DEV" 2>/dev/null | grep -q "inet " && exit 0
+  logger -t z96a-network-reconnect "wake #$i: $DEV 无 IPv4, 强制重连"
+  nmcli device reconnect "$DEV" 2>/dev/null
+  sleep 8
+done
+exit 0

@@ -55,6 +55,7 @@ function pre_customize_image__z96a_desktop_fix() {
 		"usr/lib/systemd/user/pipewire-pulse.service.d/z96a-root-session.conf" \
 		"usr/lib/systemd/user/pipewire-media-session.service.d/z96a-root-session.conf" \
 		"etc/wireplumber/main.lua.d/51-z96a-default-sink.lua" \
+		"usr/lib/systemd/system-sleep/99-z96a-network-reconnect" \
 		"usr/lib/systemd/system/z96a-desktop-setup.service" \
 		"usr/lib/armbian/z96a-desktop-setup" \
 		"var/lib/AccountsService/users/root"; do
