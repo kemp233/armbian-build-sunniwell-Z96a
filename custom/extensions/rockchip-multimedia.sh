@@ -697,6 +697,37 @@ function _rockchip_multimedia_enable_charger_service() {
 	display_alert "rockchip-multimedia" "sc8886-charger.service enabled (SC8886 watchdog will be disabled at boot)" "info"
 }
 
+# 允许 root 图形登录。两层拦截, 缺一不可 (run 36672678535 刷机后 root 登不进
+# 桌面的两个真凶, 都在 greeter 那边, armbian-config 怎么配 gdm3 都够不着):
+#
+# 1. Debian gdm3 包自带的 /etc/pam.d/gdm-password 第 3 行
+#      auth  required  pam_succeed_if.so user != root quiet_success
+#    required 标志下 root 认证必败, journal 里的表现是
+#      pam_succeed_if(gdm-password:auth): requirement "user != root" not met
+#    PAM 每次认证现读, 注释掉即生效, 不用重启 gdm3。
+# 2. gdm 自己的 [security] AllowRoot —— 由 packages/blobs/desktop/gdm/daemon.conf
+#    带进镜像, 这里不重复写。
+#
+# root 不出现在 greeter 用户列表 (accountsservice 不列 UID 0), 登录走
+# "Not listed?" -> root -> 密码。改的是包自带的 conffile, gdm3 升级时
+# dpkg 会提示冲突, 选保留本地版本即可。
+function _rockchip_multimedia_allow_root_login() {
+	local pam_file="/etc/pam.d/gdm-password"
+	if ! chroot_sdcard test -f "${pam_file}"; then
+		display_alert "rockchip-multimedia" "gdm3 not installed; skipping root login PAM fix" "warn"
+		return 0
+	fi
+	if chroot_sdcard grep -qE '^[[:space:]]*#.*pam_succeed_if.so user != root' "${pam_file}"; then
+		display_alert "rockchip-multimedia" "root login already allowed in gdm-password PAM" "info"
+		return 0
+	fi
+	chroot_sdcard sed -i 's|^auth\s\+\(required\|requisite\)\s\+pam_succeed_if\.so user != root|# Z96A: root 图形登录被 Debian gdm3 默认禁止, 调试板放开 (见 rockchip-multimedia.sh)\n# &|' "${pam_file}"
+	if chroot_sdcard grep -qE '^[[:space:]]*auth[[:space:]].*pam_succeed_if\.so user != root' "${pam_file}"; then
+		exit_with_error "rockchip-multimedia: failed to comment out the root-login PAM block in ${pam_file}"
+	fi
+	display_alert "rockchip-multimedia" "root graphical login allowed (gdm-password PAM unblocked)" "info"
+}
+
 function pre_customize_image__rockchip_multimedia_install() {
 	_rmm_source_framework || return 1
 	_rmm_init
@@ -738,6 +769,7 @@ function pre_customize_image__rockchip_multimedia_install() {
 	_rockchip_multimedia_setup_vdec_mpp_owner
 	_rockchip_multimedia_setup_gpu_access
 	_rockchip_multimedia_drop_lightdm
+	_rockchip_multimedia_allow_root_login
 	_rockchip_multimedia_enable_charger_service
 
 	display_alert "rockchip-multimedia" "installed MPP + librga + RKNN runtime + VA-API backend" "info"
