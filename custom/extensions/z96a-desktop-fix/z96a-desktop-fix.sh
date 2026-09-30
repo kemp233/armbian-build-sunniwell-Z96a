@@ -45,12 +45,16 @@ function pre_customize_image__z96a_desktop_fix() {
 
 	# 当场验收。overlay 里的东西少一个, 现象就是"修了一半", 比构建失败更难查。
 	local f
+	# 注意: drop-in 的正确位置是 /usr/lib/systemd/user/<unit>.d/ —— systemd
+	# 实际扫描的 vendor 目录。这批文件曾在 etc/lib/systemd/user/ 下 (systemd
+	# 根本不读那个路径), 属于"文件在、修复死"的静默失效, 板上排查过一轮才抓到。
 	for f in \
-		"etc/lib/systemd/user/pipewire.socket.d/z96a-root-session.conf" \
-		"etc/lib/systemd/user/pipewire.service.d/z96a-root-session.conf" \
-		"etc/lib/systemd/user/pipewire-pulse.socket.d/z96a-root-session.conf" \
-		"etc/lib/systemd/user/pipewire-pulse.service.d/z96a-root-session.conf" \
-		"etc/lib/systemd/user/pipewire-media-session.service.d/z96a-root-session.conf" \
+		"usr/lib/systemd/user/pipewire.socket.d/z96a-root-session.conf" \
+		"usr/lib/systemd/user/pipewire.service.d/z96a-root-session.conf" \
+		"usr/lib/systemd/user/pipewire-pulse.socket.d/z96a-root-session.conf" \
+		"usr/lib/systemd/user/pipewire-pulse.service.d/z96a-root-session.conf" \
+		"usr/lib/systemd/user/pipewire-media-session.service.d/z96a-root-session.conf" \
+		"etc/wireplumber/main.lua.d/51-z96a-default-sink.lua" \
 		"usr/lib/systemd/system/z96a-desktop-setup.service" \
 		"usr/lib/armbian/z96a-desktop-setup" \
 		"var/lib/AccountsService/users/root"; do
