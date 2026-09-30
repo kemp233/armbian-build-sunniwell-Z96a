@@ -20,6 +20,15 @@
 # "修了一半" (GPU/VPU 内核侧全绿但 mpv/ffmpeg 消失), 比构建失败更难查。
 # 所以每个关键文件当场断言, 缺一个就大声死。
 
+
+# mpv/ffmpeg 的**运行时**动态库: 这些 -dev 在构建时进的是 bookworm 容器,
+# 镜像里需要对应的运行时包, 否则 mpv 一跑就 "libass.so.9: cannot open"。
+# bookworm 包名 (noble 有 t64 后缀变体, 换发行版时逐个对着查)。
+function post_family_config__z96a_mpv_runtime_libs() {
+	add_packages_to_image libass9 libmpg123-0 libopusfile0 libflac8 \
+		libspeex1 libvulkan1 libfribidi0 libfreetype6 libharfbuzz0b
+}
+
 function pre_customize_image__z96a_mpv_toolchain() {
 	display_alert "Z96A mpv toolchain" "staging mpv/ffmpeg/libplacebo/gstreamer-mpp overlay" "info"
 
