@@ -97,6 +97,18 @@ jobs:
 
       - name: Install cross-compilation toolchain & deps
         run: |
+          # run 36668422995: 装之前先 full-upgrade。根因是 multiarch 同版本
+          # 约束 (Multi-Arch: same): runner 镜像快照里的 amd64 Mesa 停在
+          # 25.2.8-0ubuntu0.24.04.2 (noble-security 当时发布的版本), 而
+          # ports 的 arm64 候选已经是 .3 (noble-updates 新推的), 于是
+          #   libegl-mesa0:arm64 : Depends: libgbm1:arm64 (= .2) but it is
+          #                       not going to be installed
+          # —— 解析器想同时满足"跨架构同版本"和"候选是 .3", 死循环。
+          # 这个 job 之前每一轮都成功, 死的时点正好是 Ubuntu 把 Mesa 从 .2
+          # 升到 .3 的那天 —— 纯上游仓库漂移, 不是我们的包列表变了。
+          # full-upgrade 把 amd64 侧也拉到 .3, 跨架构版本一致, 解析自然
+          # 通过; 以后再出新版本, 升级同样把它消掉, 不用改这个文件。
+          sudo apt-get full-upgrade -y
           # security.ubuntu.com round-robins between backends that briefly
           # disagree on freshly published packages, which surfaces as a 404
           # on a perfectly valid version. Retry the whole update+install
