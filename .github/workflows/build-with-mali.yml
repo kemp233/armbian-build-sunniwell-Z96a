@@ -1506,6 +1506,13 @@ jobs:
           set -euo pipefail
           STAGE="$PWD/extensions/z96a-mpv/overlay"
           WORK="$PWD/.handler-build"
+          # 这个 step 中途会 cd 进 $WORK 编 mpv-handler, 之后 gstreamer 段
+          # 的 INSTALL_ROOT/BUILD_PC 必须仍然指回**仓库根** —— 上一个 step
+          # 的 MPP/FFmpeg/libplacebo 全装在 $REPO_ROOT/.local-root。
+          # run 36658523536: INSTALL_ROOT 在 cd "$WORK" 之后才算, 相对路径
+          # 落成了 .handler-build/.local-root (空目录), MPP 断言当场红。
+          # 断言本身是对的 —— 它如实报告了"那里没有 .pc"。
+          REPO_ROOT="$PWD"
           mkdir -p "$WORK"
 
           # ==================================================================
@@ -1625,8 +1632,10 @@ jobs:
           # 安装树和 BUILD_PC 镜像要和上一个 step 完全一致 (变量不跨 step,
           # 各自重建)。不重建的话 pkg-config 会把 -L 指到真正的
           # /usr/local —— runner 上那里是空的, 链接必炸。
-          INSTALL_ROOT="$PWD/.local-root"
-          BUILD_PC="$PWD/.pc-build"
+          # 必须用仓库根 (见本 step 开头 REPO_ROOT 的注释): 此刻 $PWD 是
+          # .handler-build, 相对路径会指到空的 .local-root。
+          INSTALL_ROOT="$REPO_ROOT/.local-root"
+          BUILD_PC="$REPO_ROOT/.pc-build"
           mkdir -p "$BUILD_PC"
           # find 的起始路径必须先 exist: 目录不存在时 find 返回 1,
           # 2>/dev/null 只藏报错不藏退出码, pipefail + set -e 会无声杀死
