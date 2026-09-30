@@ -1346,8 +1346,13 @@ jobs:
           meson setup build \
             -Dprefix=/usr/local \
             -Dgpl=true \
-            -Dlibmpv=true \
-            -Dcplayer=false
+            -Dlibmpv=true
+          # 这里**不能**加 -Dcplayer=false。run 36656011005: libmpv.so.2.3.0
+          # 编出来装好了, 断言"没编出 mpv" —— cplayer=false 把 mpv 命令行
+          # 二进制整个关了, 而 stage 自检、ldd 核对、镜像里的 Play with MPV
+          # (mpv-handler 调的是 mpv 可执行文件, 不是 libmpv) 全都要那个
+          # 二进制。和 --disable-programs 同一天、同一个 commit 引入的同类
+          # 矛盾, 也是直到前面的关全过完才第一次被走到。
           meson compile -C build
           DESTDIR="$INSTALL_ROOT" meson install -C build
           cd "$WORK"
