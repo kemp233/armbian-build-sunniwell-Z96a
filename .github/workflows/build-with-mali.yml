@@ -839,12 +839,18 @@ jobs:
           # 音频: ConditionUser=!root 的 drop-in, 五个单元一个都不能少。
           # 少任何一个, 那条服务就还是 "skipped because of an unmet
           # condition check", 桌面上依旧一点声音都没有。
+          # 路径必须是 usr/lib/systemd/user/<unit>.d/ —— systemd 实际扫描
+          # 的 vendor drop-in 目录。这批文件曾在 etc/lib/systemd/user/ 下
+          # (systemd 不读那个路径, 文件在也等于没修), run 36685124632 的
+          # verify 就是抓着旧路径查才拦下的。
           for u in pipewire.socket pipewire.service pipewire-pulse.socket \
                    pipewire-pulse.service pipewire-media-session.service; do
-            D="$Z96A_FIX_EXT/overlay/etc/lib/systemd/user/$u.d/z96a-root-session.conf"
+            D="$Z96A_FIX_EXT/overlay/usr/lib/systemd/user/$u.d/z96a-root-session.conf"
             test -f "$D"
             grep -q '^ConditionUser=$' "$D"
           done
+          # 扬声器默认输出的 wireplumber 规则 (rk809 压过 HDMI) 也要在。
+          test -f "$Z96A_FIX_EXT/overlay/etc/wireplumber/main.lua.d/51-z96a-default-sink.lua"
 
           # 音频包: pipewire-audio 一次性带上 pipewire-pulse + pipewire-alsa +
           # wireplumber, 且与 pulseaudio 互斥。单装 pulseaudio 不提供
