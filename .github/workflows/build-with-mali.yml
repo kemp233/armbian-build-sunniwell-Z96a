@@ -1149,8 +1149,15 @@ jobs:
             --enable-rkmpp --enable-libdrm \
             --enable-openssl \
             --enable-shared --disable-static \
-            --disable-doc --disable-debug \
-            --disable-programs
+            --disable-doc --disable-debug
+          # 这里**不能**加 --disable-programs: run 36593271057 就死在这。
+          # 关掉 programs 之后 ffmpeg/ffprobe 根本不编, make install 只
+          # 装库/头文件/.pc (日志里 270 条 INSTALL 全是 libav*/libsw*),
+          # 于是下面第一条断言 $INSTALL_ROOT/usr/local/bin/ffmpeg 直接
+          # "No such file or directory"。而这个 step 从头到尾都依赖那两个
+          # 二进制: 断言 https、断言 rkmpp、拷进 STAGE、自检必须存在、
+          # 最后逐个 ldd 核对。断言挂在不存在的文件上, 报的还是
+          # "仍然没有 https 协议" —— https 其实在 configure 摘要里就有。
           make -j"$(nproc)"
           # DESTDIR 安装进 INSTALL_ROOT (见上面的注释)。ffmpeg 不设 rpath,
           # 跑它要靠 LD_LIBRARY_PATH 指进安装树。
