@@ -712,17 +712,23 @@ function _rockchip_multimedia_enable_charger_service() {
 # "Not listed?" -> root -> 密码。改的是包自带的 conffile, gdm3 升级时
 # dpkg 会提示冲突, 选保留本地版本即可。
 function _rockchip_multimedia_allow_root_login() {
-	local pam_file="/etc/pam.d/gdm-password"
-	if ! chroot_sdcard test -f "${pam_file}"; then
+	# **全部走宿主侧文件操作, 不经过 chroot_sdcard**。
+	# run 36691731739: sed/grep 的模式串里有 "user != root" —— 空格加 !=,
+	# 过 chroot_sdcard 的二次引用包装后被拆词 (journal: "grep: user: No such
+	# file or directory" / "grep: !=: No such file or directory" / bash -c
+	# 语法错误), 整个镜像构建死在 runners.sh:211。/etc/pam.d/gdm-password
+	# 是普通文件, ${SDCARD} 路径直接读写即可, 没必要进 chroot。
+	local pam_file="${SDCARD}/etc/pam.d/gdm-password"
+	if [[ ! -f "${pam_file}" ]]; then
 		display_alert "rockchip-multimedia" "gdm3 not installed; skipping root login PAM fix" "warn"
 		return 0
 	fi
-	if chroot_sdcard grep -qE '^[[:space:]]*#.*pam_succeed_if.so user != root' "${pam_file}"; then
+	if grep -qE '^[[:space:]]*#.*pam_succeed_if.so user != root' "${pam_file}"; then
 		display_alert "rockchip-multimedia" "root login already allowed in gdm-password PAM" "info"
 		return 0
 	fi
-	chroot_sdcard sed -i 's|^auth\s\+\(required\|requisite\)\s\+pam_succeed_if\.so user != root|# Z96A: root 图形登录被 Debian gdm3 默认禁止, 调试板放开 (见 rockchip-multimedia.sh)\n# &|' "${pam_file}"
-	if chroot_sdcard grep -qE '^[[:space:]]*auth[[:space:]].*pam_succeed_if\.so user != root' "${pam_file}"; then
+	sed -E -i 's@^auth[[:space:]]+(required|requisite)[[:space:]]+pam_succeed_if\.so user != root@# Z96A: root 图形登录被 Debian gdm3 默认禁止, 调试板放开 (见 rockchip-multimedia.sh)\n# &@' "${pam_file}"
+	if grep -qE '^[[:space:]]*auth[[:space:]].*pam_succeed_if\.so user != root' "${pam_file}"; then
 		exit_with_error "rockchip-multimedia: failed to comment out the root-login PAM block in ${pam_file}"
 	fi
 	display_alert "rockchip-multimedia" "root graphical login allowed (gdm-password PAM unblocked)" "info"
