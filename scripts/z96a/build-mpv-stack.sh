@@ -520,7 +520,7 @@ if [ ! -e "$STAGE/usr/local/lib/libshaderc_shared.so.1" ]; then
   echo "断言失败: stage 里没有 libshaderc_shared.so.1 —— libplacebo 在镜像里会加载失败"
   exit 1
 fi
-echo "  有: libshaderc.so.1"
+echo "  有: libshaderc_shared.so.1"
 # 终极断言: 逐个用 ldd 过一遍会进镜像的动态库和可执行文件,
 # 任何 "not found" 都意味着镜像里一跑就挂。镜像里唯一的库路径
 # 是 /usr/local/lib + /usr/local/lib/aarch64-linux-gnu

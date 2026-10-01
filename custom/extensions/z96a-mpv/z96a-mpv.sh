@@ -55,7 +55,7 @@ function pre_customize_image__z96a_mpv_toolchain() {
 	# 当场验收: 库、配置、插件一个都不能少。
 	for f in \
 		"usr/local/lib/aarch64-linux-gnu/libplacebo.so" \
-		"usr/local/lib/libshaderc.so.1" \
+		"usr/local/lib/libshaderc_shared.so.1" \
 		"root/.config/mpv/mpv.conf" \
 		"root/.config/mpv-handler/config.toml" \
 		"etc/ld.so.conf.d/zz-armbian-local.conf" \
