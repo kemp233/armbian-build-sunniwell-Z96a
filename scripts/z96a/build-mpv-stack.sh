@@ -237,7 +237,7 @@ if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1" ]; then
   mkdir -p "$INSTALL_ROOT/usr/local/lib" "$INSTALL_ROOT/usr/local/include/shaderc"
   cp "$SO" "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1"
   ln -sf libshaderc.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc.so"
-  cp "$WORK/shaderc-src/include/shaderc/shaderc.h" "$INSTALL_ROOT/usr/local/include/shaderc/"
+  cp "$WORK/shaderc-src/libshaderc/include/shaderc/shaderc.h" "$INSTALL_ROOT/usr/local/include/shaderc/"
   echo "shaderc 自包含版已就位: $SO"
 else
   echo "shaderc 已就绪, 跳过"
