@@ -19,6 +19,26 @@ mkdir -p "$WORK"
 # ==================================================================
 # 一、mpv-handler —— "Play with MPV" 的来源
 # ==================================================================
+apt_update_ok=0
+for i in 1 2 3; do
+  if apt-get update; then apt_update_ok=1; break; fi
+  echo "apt-get update failed, retrying (attempt $i/3)"; sleep 10
+done
+[ "$apt_update_ok" = 1 ] || exit 1
+apt-get install -y --no-install-recommends \
+  build-essential meson ninja-build pkg-config bison flex curl ca-certificates \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libgstreamer-plugins-bad1.0-dev \
+  libx11-dev libdrm-dev
+# 装没装上, 当场验, 不留给 meson 的报错去猜
+for p in gstreamer-1.0 gstreamer-plugins-base-1.0 gstreamer-plugins-bad-1.0 libdrm; do
+  if ! pkg-config --exists "$p"; then
+    echo "断言失败: pkg-config 找不到 $p —— apt 安装没生效"
+    exit 1
+  fi
+done
+echo "gstreamer 开发包齐了"
+
 # 这是 Rust 项目, edition = 2024, 最低要 Rust 1.85; 而
 # ubuntu-24.04 自带的是 1.75, 直接 apt 装 rustc 会在
 # "edition2024" 上当场报错。所以必须上 rustup。
@@ -112,25 +132,7 @@ cd "$WORK"
 # 顶层 meson.build 对 disabled 的 required:false 依赖会干净跳过,
 # 所以直接不装。
 # 这些是插件编译的硬依赖, 失败就该当场红。
-apt_update_ok=0
-for i in 1 2 3; do
-  if apt-get update; then apt_update_ok=1; break; fi
-  echo "apt-get update failed, retrying (attempt $i/3)"; sleep 10
-done
-[ "$apt_update_ok" = 1 ] || exit 1
-apt-get install -y --no-install-recommends \
-  build-essential meson ninja-build pkg-config bison flex curl ca-certificates \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-  libgstreamer-plugins-bad1.0-dev \
-  libx11-dev libdrm-dev
-# 装没装上, 当场验, 不留给 meson 的报错去猜
-for p in gstreamer-1.0 gstreamer-plugins-base-1.0 gstreamer-plugins-bad-1.0 libdrm; do
-  if ! pkg-config --exists "$p"; then
-    echo "断言失败: pkg-config 找不到 $p —— apt 安装没生效"
-    exit 1
-  fi
-done
-echo "gstreamer 开发包齐了"
+
 
 # MPP 由**上一个 step** 已经编好 (FFmpeg configure 需要它, 所以
 # 顺序在前)。这里只复用, 不重编 —— 编过一次的东西再编一遍纯属
