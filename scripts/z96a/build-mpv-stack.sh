@@ -44,7 +44,7 @@ apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
   python3-mako python3-jinja2 \
   libssl-dev \
-  libvulkan-dev libshaderc-dev \
+  libvulkan-dev \
   libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libdrm-dev \
   libx11-dev libxrandr-dev libxcb1-dev libxcb-dri2-0-dev \
   libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev \
@@ -211,38 +211,11 @@ fi
 echo "FFmpeg rkmpp 硬解: 已启用"
 cd "$WORK"
 
-# ---- shaderc 链接 --------------------------------------------
-# 在 Debian bookworm 上, 修法是: 自己拼一份 .pc, 把 glslang 的
-# 一串静态库按依赖顺序列全。**这个修法在 noble 上是死路**:
-#   - glslang 15 把 libHLSL/libOGLCompiler 合并进了 libglslang
-#   - noble 根本没有 libspirv-tools-dev —— spirv.pc 的
-#     `Requires: SPIRV-Tools` 无从满足, glslang 路线走不通
-# 所以这里改走**发行版的 libshaderc.so.1**: Ubuntu 构建它时已经把
-# glslang 和 SPIRV-Tools 静态打进了这一个 .so (libshaderc1 只依赖
-# libc/libgcc/libstdc++, 没有 libglslang 依赖, 就是证据)。
-# 这是 noble 上唯一可行的 shaderc 链接方式, 也是 libplacebo 必须
-# 钉死 `-Dshaderc=enabled -Dglslang=disabled` 的原因。
-#
-# noble 的发行版 bug 照样要补: libshaderc-dev 只发 libshaderc.a /
-# libshaderc_combined.a (而且 combined.a 并不自包含, spvtools:: 符号
-# 全是未定义引用), `shaderc.pc` 却写 `-lshaderc` —— 而 libshaderc.so
-# 这个符号链接谁都不发, 发 .so.1 的 libshaderc1 是运行时包。链接器
-# 找不到 -lshaderc。自己补上这个符号链接。
-if [ ! -e /usr/lib/aarch64-linux-gnu/libshaderc.so.1 ]; then
-  echo "断言失败: /usr/lib/aarch64-linux-gnu/libshaderc.so.1 不存在"
-  echo "  libshaderc1 是 libshaderc-dev 的依赖, 不该缺。检查 apt 源。"
-  exit 1
-fi
-# 发行版 bug 的修法也要进 INSTALL_ROOT: /usr/local 系统目录写不了
-# (run 36578273991), 而且这份 .pc 最终就是要随镜像走的。
-# 把 libshaderc.so.1 连同缺失的 .so 符号链接一起复制进
-# $INSTALL_ROOT/usr/local/lib, shaderc.pc 的 libdir 指向同一个
-# 地方 —— 构建期 BUILD_PC 镜像指对它, 镜像里由 /usr/local/lib
-# (ld.so.conf.d) 接管, 不依赖发行版的 libshaderc1。
+# ---- shaderc.pc 与链接自检 ------------------------------------
+# libshaderc.so.1 已在上面从上游源码自建 (自包含, 见 "shaderc: 容器内
+# 自建自包含版"), 这里只写 .pc 并当场链接自检。Debian 的发行版 .so.1
+# 不能用 (spvtools 193 个未定义符号, release 185 板上实测)。
 mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig"
-cp -a /usr/lib/aarch64-linux-gnu/libshaderc.so.1 \
-      "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1"
-ln -sf libshaderc.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc.so"
 {
   echo 'prefix=/usr/local'
   echo 'exec_prefix=${prefix}'
