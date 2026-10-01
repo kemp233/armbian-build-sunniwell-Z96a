@@ -573,7 +573,12 @@ echo "  FFmpeg 7.x 的两个 API 补丁: 上游已自带, 不再需要"
 # (3) rkmpp 硬解补丁。**必须打**: 不打的话 mpv 0.41 在这块板上会静默
 # 退回软解 —— 没有一帧渲染失败, 日志干干净净, 只有 "Using software
 # decoding" 一行。起因和机理见补丁文件头。
-python3 "$SCRIPT_DIR/patch-mpv-rkmpp-hwdec.py" mpv
+# 参数是**绝对路径**: 上面第 554 行已经 `cd mpv`, CWD 就是源码根,
+# 这里再传个相对的 "mpv" 会被拼成 $WORK/mpv/mpv/... ——
+# run 36909362820 就死在这, 报的是
+#   FileNotFoundError: 'mpv/video/hwdec.h'
+# 看着像补丁脚本本身坏了, 其实只是路径相对错了 CWD。
+python3 "$SCRIPT_DIR/patch-mpv-rkmpp-hwdec.py" "$PWD"
 # -Dwayland/-Degl-wayland/-Degl-drm/-Dgbm/-Ddrm 必须显式 enabled。
 # mpv 的这些是 feature 型选项, 默认 auto —— 探测失败就悄悄关掉, 编出
 # 一个 gpu-context 列表里根本没有 wayland/drm 的 mpv, 运行时只会表现为

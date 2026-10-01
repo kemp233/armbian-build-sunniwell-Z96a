@@ -74,7 +74,27 @@ def patch(relpath, old, new, expect=1):
 
 if len(sys.argv) != 2:
     sys.exit("用法: %s <mpv 源码目录>" % sys.argv[0])
-SRC = sys.argv[1]
+SRC = os.path.abspath(sys.argv[1])
+
+# 目录本身先验一遍, 别让下面那句 open() 抛裸 traceback。
+# run 36909362820 就是这么死的: 调用点在 `cd mpv` 之后, 传进来的
+# "mpv" 被拼成 $WORK/mpv/mpv, 于是
+#   FileNotFoundError: [Errno 2] No such file or directory: 'mpv/video/hwdec.h'
+# 看着像补丁脚本坏了, 其实是调用点传错了路径。顺手把实际 CWD 一起打出来,
+# 这种"路径相对谁的 CWD"的错一眼就能看出来。
+for _probe in ("meson.build", "video/hwdec.h", "video/hwdec.c",
+               "video/decode/vd_lavc.c"):
+    if not os.path.isfile(os.path.join(SRC, _probe)):
+        sys.exit(
+            "不是 mpv 源码目录: %s 下找不到 %s\n"
+            "  传入参数 : %s\n"
+            "  解析成   : %s\n"
+            "  当前 CWD : %s\n"
+            "  调用点已经在 `cd mpv` 之后, CWD 就是源码根, 所以这里要传 `.` "
+            "或绝对路径; 传相对的 \"mpv\" 会被拼成 <源码根>/mpv/..." % (
+                SRC, _probe, sys.argv[1], SRC, os.getcwd(),
+            )
+        )
 
 # 幂等守卫。三处替换的锚点在打过补丁之后**依然**匹配 (hwdec.c 的插入点
 # 在锚点之前, vd_lavc.c 的 old 是 new 的前缀), 所以光靠"匹配数 == 1"
