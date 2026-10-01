@@ -20,6 +20,11 @@ STAGE="$PWD/extensions/z96a-mpv/overlay"
 mkdir -p "$STAGE"
 WORK="$PWD/.mpv-build"
 mkdir -p "$WORK"
+# 本脚本自带的补丁脚本所在目录。CI 里的调用是
+#   bash /work/scripts/z96a/build-mpv-stack.sh
+# (build-with-mali.yml), 之后本脚本会 cd 到 $WORK, 所以这里先把
+# 绝对路径定下来, 免得后面相对路径失效。
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ---- 构建依赖 -------------------------------------------------
 # 包名以 **Debian bookworm (arm64 容器)** 为准 (2026-10-01 从 noble
@@ -42,7 +47,7 @@ done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
-  python3-mako python3-jinja2 \
+  python3 python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev \
   libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libdrm-dev \
@@ -52,15 +57,39 @@ apt-get install -y --no-install-recommends \
   wayland-protocols libxkbcommon-dev libwayland-dev \
   libass-dev libfreetype-dev libharfbuzz-dev libfribidi-dev \
   libvorbis-dev libopus-dev libopusfile-dev \
-  libflac-dev libmpg123-dev libspeex-dev
+  libflac-dev libmpg123-dev libspeex-dev \
+  hwdata
+# hwdata 是自建 libdisplay-info 的**构建期**依赖 (meson.build:24 硬性
+# 要求 /usr/share/hwdata/pnp.ids, 缺了直接 ERROR 退出)。
+# bookworm 主仓库没有 libdisplay-info, 只有 bookworm-backports 的
+# 0.2.0-2~bpo12+1 —— 而 CI 容器是裸 debian:bookworm, 镜像侧也不保证
+# 开了 backports, 所以下面的 libdisplay-info 一律自建。
+# 镜像**不需要** hwdata: mpv 只用 libdisplay-info 解 EDID
+# (video/out/drm_common.c 里的 di_info_parse_edid / di_edid_* /
+# di_cta_*), 全是纯计算, 唯一依赖 hwdata 的 di_get_pnp_ids() mpv
+# 根本没调。
 
 # ---- 版本钉死 -------------------------------------------------
 # 全部钉到具体 commit/tag, 不用分支头。上游一动这里就炸, 总比
 # 悄悄编出一个不同的东西好。
 FFMPEG_REPO=https://github.com/nyanmisaka/ffmpeg-rockchip.git
 FFMPEG_COMMIT=d90e3a1
-LIBPLACEBO_TAG=v6.338.2
-MPV_TAG=v0.38.0
+LIBPLACEBO_TAG=v7.360.1
+MPV_TAG=v0.41.0
+# mpv 0.41 的 video/out/wayland_common.c:3293 无条件调
+# wp_color_manager_v1_get_version(), 而 color-management-v1 这个协议
+# wayland-protocols 要到 **1.41** 才带 —— bookworm 只有 1.31, 于是编译
+# 报 "implicit declaration of function wp_color_manager_v1_get_version"
+# 直接失败。这是上游没给老 wayland-protocols 留 #ifdef 的 bug, 只能
+# 升级协议包绕开。1.41/1.43 要求 wayland-scanner >= 1.20 (libwayland-dev
+# 自带 1.21, 够); 再往上 1.48 起要求 scanner >= 1.23, bookworm 满足不了。
+# 1.43 是这个 scanner 版本能用的最高版本, 就钉它。
+WAYLAND_PROTOCOLS_TAG=1.43
+# mpv 0.41 的 video/out/gpu/context_drm.c / drm_common.c 需要
+# libdisplay-info >= 0.1.1, 见下面 meson.build:958-962 —— 找到就链进去
+# (mpv 二进制的 DT_NEEDED 会多一条 libdisplay-info.so.2)。
+# 同样因为 bookworm 主仓库没有, 自建。
+LIBDISPLAY_INFO_TAG=0.2.0
 YTDLP_URL=https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp
 
 # ---- 安装根: runner 可写, 模拟镜像的 / --------------------------
@@ -360,33 +389,166 @@ find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
   sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
 done
 
-# ---- mpv 0.38 -------------------------------------------------
+# ---- wayland-protocols: bookworm 的 1.31 编不过 mpv 0.41 --------
+# 起因见版本钉死处的注释。这里只做一件事: 装一份 1.43 进
+# INSTALL_ROOT, 刷新 BUILD_PC 让 mpv 的 meson 看得见。
+# 生成的协议 C 代码是**编进 mpv** 的, 镜像运行时不需要这些 XML, 所以
+# 不进 stage —— 它和 libplacebo.pc 一样属于纯构建期输入, 而仓库本来
+# 就不往 stage 里拷 multiarch 的 .pc。
+#
+# -Dtests=false 必须给: 1.41+ 的测试要 wayland-scanner >= 1.20 且
+# 需要额外依赖, 而 scanner 是 1.21 的, 测试编不出来。
+git clone --depth 1 --branch "$WAYLAND_PROTOCOLS_TAG" \
+  https://gitlab.freedesktop.org/wayland/wayland-protocols.git wayland-protocols
+meson setup wayland-protocols/build wayland-protocols \
+      --prefix=/usr/local --buildtype=release -Dtests=false
+DESTDIR="$INSTALL_ROOT" meson install -C wayland-protocols/build
+if [ ! -f "$INSTALL_ROOT/usr/local/share/wayland-protocols/staging/color-management/color-management-v1.xml" ]; then
+  echo "断言失败: wayland-protocols $WAYLAND_PROTOCOLS_TAG 里没有 color-management-v1.xml"
+  echo "  mpv 0.41 的 wayland_common.c 会无条件调它的 C 代码, 缺了编译就挂"
+  ls "$INSTALL_ROOT/usr/local/share/wayland-protocols/staging/color-management/" 2>/dev/null || true
+  exit 1
+fi
+echo "wayland-protocols $WAYLAND_PROTOCOLS_TAG 已就位"
+
+# ---- libdisplay-info: 自建, 因为 bookworm 主仓库没有 -----------
+# mpv 0.41 meson.build:958-962:
+#   libdisplay_info = dependency('libdisplay-info', version: '>= 0.1.1',
+#                               required: get_option('drm'))
+#   dependencies += [drm, libdisplay_info]
+# 找到就链进 mpv 二进制 (DT_NEEDED 多一条 libdisplay-info.so.2), 而且
+# **drm 这条 GPU context 直接由它 gate**: 不满足就没有 gpu-context=drm。
+# bookworm 只有 bookworm-backports 的 0.2.0, 容器和镜像都不保证有
+# backports, 所以自建 (和上面的 shaderc 一个路子)。
+#
+# 0.2.0 的 meson_options.txt 是空的 —— 传任何 -Dxxx 都会被 meson 判成
+# Unknown option 直接失败 (实测: `-Dtests=false` -> "Unknown option:
+# \"tests\""), 下面一个选项都不给。
+# hwdata 是构建期硬依赖 (meson.build:24 检查 /usr/share/hwdata/pnp.ids),
+# 已在 apt 名单里; 运行时不需要, 理由见那里。
+git clone --depth 1 --branch "$LIBDISPLAY_INFO_TAG" \
+  https://gitlab.freedesktop.org/emersion/libdisplay-info.git libdisplay-info
+meson setup libdisplay-info/build libdisplay-info \
+      --prefix=/usr/local --buildtype=release
+meson compile -C libdisplay-info/build
+DESTDIR="$INSTALL_ROOT" meson install -C libdisplay-info/build
+# SONAME 是 libdisplay-info.so.2, mpv 的 DT_NEEDED 记的就是它;
+# 旁边的 .pc 版本必须是 >= 0.1.1, 否则 mpv 探测阶段就跳过 drm
+# -print -quit 而不是 `find … | head -1`: pipefail 下 find 吃到
+# SIGPIPE 会返回 141, `set -e` 直接把整个 step 打死, 而失败信息是
+# 一个空的命令替换值, 极难往回找 (本 step 开头的注释记过一次同源的坑)。
+LDI_PC=$(find "$INSTALL_ROOT/usr/local/lib" -name 'libdisplay-info.pc' -print -quit)
+if [ -z "$LDI_PC" ]; then
+  echo "断言失败: 自建的 libdisplay-info 没装出 .pc"
+  exit 1
+fi
+if ! grep -qE '^Version: 0\.[2-9]|^Version: [1-9]' "$LDI_PC"; then
+  echo "断言失败: libdisplay-info.pc 的版本满足不了 mpv 的 >= 0.1.1"
+  grep '^Version' "$LDI_PC"
+  exit 1
+fi
+if ! ls "$INSTALL_ROOT"/usr/local/lib/aarch64-linux-gnu/libdisplay-info.so.2 >/dev/null 2>&1; then
+  echo "断言失败: libdisplay-info.so.2 没装到 multiarch 目录"
+  find "$INSTALL_ROOT/usr/local/lib" -name 'libdisplay-info*' | head
+  exit 1
+fi
+echo "libdisplay-info $LIBDISPLAY_INFO_TAG 已就位 ($(grep '^Version' "$LDI_PC"))"
+cd "$WORK"
+# 这两个包的 .pc 刚落地, 刷新 BUILD_PC, mpv 才能探测到它们。
+#
+# share/pkgconfig 这一项不能少: wayland-protocols 不装到 lib/pkgconfig
+# 也不装到 lib/<triplet>/pkgconfig, 而是装到 **share/pkgconfig/**
+# (/usr/local/share/pkgconfig/wayland-protocols.pc)。漏掉它的话
+# mpv 的 meson 会解析到容器自带的系统那份 1.31, 于是又回到
+# "implicit declaration of function wp_color_manager_v1_get_version"
+# —— 症状和没装 1.43 一模一样, 很容易误判成 clone 失败或者 meson
+# 版本问题, 实际是 .pc 根本没进 PKG_CONFIG_PATH 的搜索路径。
+mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+         "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+         "$INSTALL_ROOT/usr/local/share/pkgconfig"
+find "$INSTALL_ROOT/usr/local/lib/pkgconfig" \
+     "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu/pkgconfig" \
+     "$INSTALL_ROOT/usr/local/share/pkgconfig" \
+     -name '*.pc' 2>/dev/null | while IFS= read -r f; do
+  sed "s|^prefix=.*|prefix=$INSTALL_ROOT/usr/local|" "$f" > "$BUILD_PC/$(basename "$f")"
+done
+# mpv 只要求 wayland-protocols >= 1.31, 所以探测到了"一份"
+# wayland-protocols 就算成功 —— 哪怕拿到的是系统那份 1.31。这里必须
+# 显式断言版本和路径都对, 否则上面那条 find 少列一个目录, mpv 照样
+# 配得起来, 只是编不过, 失败信息还落在几千行之后的 C 报错上。
+WP_VER=$(PKG_CONFIG_PATH="$BUILD_PC${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+         pkg-config --modversion wayland-protocols 2>/dev/null || true)
+WP_DIR=$(PKG_CONFIG_PATH="$BUILD_PC${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+         pkg-config --variable=pkgdatadir wayland-protocols 2>/dev/null || true)
+if [ "$WP_VER" != "$WAYLAND_PROTOCOLS_TAG" ]; then
+  echo "断言失败: 解析到的 wayland-protocols 是 '$WP_VER', 期望 '$WAYLAND_PROTOCOLS_TAG'"
+  echo "  pkgdatadir=$WP_DIR"
+  echo "  BUILD_PC=$BUILD_PC"
+  exit 1
+fi
+if [ ! -f "$WP_DIR/staging/color-management/color-management-v1.xml" ]; then
+  echo "断言失败: pkgdatadir 指向的目录里没有 color-management-v1.xml —— $WP_DIR"
+  exit 1
+fi
+echo "  wayland-protocols: $WP_VER (pkgdatadir 落在 INSTALL_ROOT 里)"
+
+# ---- mpv 0.41 -------------------------------------------------
 # 三个补丁, 全是 FFmpeg 7.x 的 API 变更, 每一个都断言改了行数 ——
 # 上游一变 sed 没匹配上, 必须当场炸, 不能编出个看着成功、
 # 实际跑起来才崩的东西。
 git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git mpv
 cd mpv
-# (1) FF_PROFILE_* 在 FFmpeg 7 里改名成 AV_PROFILE_*。
-for f in audio/decode/ad_spdif.c demux/demux_mkv.c; do
-  before=$(grep -c 'FF_PROFILE_' "$f" || true)
-  [ "$before" -gt 0 ] || { echo "断言失败: $f 里没有 FF_PROFILE_ 了, 补丁该撤"; exit 1; }
-  sed -i 's/\bFF_PROFILE_/AV_PROFILE_/g' "$f"
-  echo "  $f: FF_PROFILE_ -> AV_PROFILE_ ($before 处)"
-done
-# (2) av_format_inject_global_side_data() 连同整个 global side data
-#     API 一起被上游删了。mpv 本来就直接从 stream side data 读
-#     DoVi 配置, 删掉这行不影响行为。
-if grep -q 'av_format_inject_global_side_data' demux/demux_lavf.c; then
-  n=$(grep -c 'av_format_inject_global_side_data' demux/demux_lavf.c)
-  sed -i '/av_format_inject_global_side_data(avfc);/d' demux/demux_lavf.c
-  echo "  demux_lavf.c: 删掉 av_format_inject_global_side_data ($n 处)"
-else
-  echo "  demux_lavf.c: 上游已经不需要这行了, 跳过"
+# (1)(2) 原来那两个 FFmpeg 7.x 的 API 补丁 —— mpv 0.41 自己已经不用
+# 那两个旧符号了 (ad_spdif.c / demux_mkv.c 里 FF_PROFILE_ 残留 0 处,
+# demux_lavf.c 里 av_format_inject_global_side_data 0 处), 所以补丁本身
+# 必须撤掉。但不能只是删了事: 删掉就等于放弃了对"上游真的修好了吗"的
+# 断言。改成**反向断言** —— 这两个符号哪天重新出现, 说明钉的 mpv 版本
+# 和这里以为的不一样, 当场炸, 而不是编出一个行为不明的 mpv。
+if grep -l 'FF_PROFILE_' audio/decode/ad_spdif.c demux/demux_mkv.c 2>/dev/null | grep -q .; then
+  echo "断言失败: ad_spdif.c / demux_mkv.c 里又出现 FF_PROFILE_ 了 ——"
+  echo "  这个 mpv 版本重新需要 FFmpeg 7.x 的改名补丁, 补丁得加回来"
+  grep -c 'FF_PROFILE_' audio/decode/ad_spdif.c demux/demux_mkv.c
+  exit 1
 fi
+if grep -q 'av_format_inject_global_side_data' demux/demux_lavf.c; then
+  echo "断言失败: demux_lavf.c 里又出现 av_format_inject_global_side_data 了 ——"
+  echo "  这个 mpv 版本重新需要删这行的补丁, 补丁得加回来"
+  exit 1
+fi
+echo "  FFmpeg 7.x 的两个 API 补丁: 上游已自带, 不再需要"
+# (3) rkmpp 硬解补丁。**必须打**: 不打的话 mpv 0.41 在这块板上会静默
+# 退回软解 —— 没有一帧渲染失败, 日志干干净净, 只有 "Using software
+# decoding" 一行。起因和机理见补丁文件头。
+python3 "$SCRIPT_DIR/patch-mpv-rkmpp-hwdec.py" mpv
+# -Dwayland/-Degl-wayland/-Degl-drm/-Dgbm/-Ddrm 必须显式 enabled。
+# mpv 的这些是 feature 型选项, 默认 auto —— 探测失败就悄悄关掉, 编出
+# 一个 gpu-context 列表里根本没有 wayland/drm 的 mpv, 运行时只会表现为
+# "auto 挑了个软 context", 没有任何报错。实测会翻车的地方:
+#   meson.build:1035-1052  wayland  <- xkbcommon >= 0.3.0
+#   meson.build:956-960    drm     <- libdisplay-info >= 0.1.1
+#   meson.build:972-978    gbm     <- features['drm'] + gbm >= 17.1.0
+#   meson.build:1248-1254  egl-wayland <- wayland-egl >= 9.0.0
+# 依赖齐了的时候 auto 本来就会开, 显式写出来是为了在依赖没齐时炸在
+# meson 而不是炸在用户的播放器上。
+#
+# **不能**动 x11: 强行 -Dx11=enabled 会牵出 libXss/libXpresent
+# (meson.build:1089-1091), 容器里没装, 直接 xscrnsaver not found。
+# x11 留 auto, 探测不到就关掉, 对这个 Wayland/GNOME 镜像无影响。
 meson setup build \
   -Dprefix=/usr/local \
   -Dgpl=true \
-  -Dlibmpv=true
+  -Dlibmpv=true \
+  -Dtests=false \
+  -Dmanpage-build=disabled \
+  -Dwayland=enabled \
+  -Degl-wayland=enabled \
+  -Degl-drm=enabled \
+  -Dgbm=enabled \
+  -Ddrm=enabled
+# -Dmanpage-build 是 feature 型 (enabled/disabled/auto), 传 false 会被
+# meson 当非法值拒掉: `Value "false" ... Possible choices
+# "enabled","disabled","auto"`。另外 html-build / pdf-build 在 mpv 里
+# 默认就是 disabled, 不用管。
 # 这里**不能**加 -Dcplayer=false。run 36656011005: libmpv.so.2.3.0
 # 编出来装好了, 断言"没编出 mpv" —— cplayer=false 把 mpv 命令行
 # 二进制整个关了, 而 stage 自检、ldd 核对、镜像里的 Play with MPV
@@ -395,6 +557,33 @@ meson setup build \
 # 矛盾, 也是直到前面的关全过完才第一次被走到。
 meson compile -C build
 DESTDIR="$INSTALL_ROOT" meson install -C build
+# ---- mpv 链接结果的当场断言 ------------------------------------
+# 1) libplacebo soname: 6.338.2 是 so.338, 7.360.1 是 so.360。CI 里
+#    配错了 mpv/libplacebo 的一对, 镜像上就会在 ld.so.conf.d 都配好、
+#    文件也都在的情况下报 "libplacebo.so.XXX: cannot open shared object
+#    file"。这里当场钉死, 比在板上查一小时强。
+MPV_NEEDED=$(objdump -p "$INSTALL_ROOT/usr/local/bin/mpv" | awk '/NEEDED/{print $2}')
+case " $MPV_NEEDED " in
+  *" libplacebo.so.360 "*) ;;
+  *)
+    echo "断言失败: mpv 没有链接 libplacebo.so.360, 实际是:"
+    echo "$MPV_NEEDED" | grep -i placebo || echo "  (一条都没链接!)"
+    echo "  libplacebo $LIBPLACEBO_TAG 的 soname 应当是 360"
+    exit 1 ;;
+esac
+echo "  mpv -> libplacebo.so.360"
+# 2) libdisplay-info: 它是 drm GPU context 的唯一 gate
+#    (meson.build:958-962), 缺了就没有 gpu-context=drm, 而且
+#    mpv 二进制少一条 DT_NEEDED。这条同时兜住上面 wayland-protocols /
+#    libdisplay-info 两个新段有没有真的生效。
+case " $MPV_NEEDED " in
+  *" libdisplay-info.so.2 "*) ;;
+  *)
+    echo "断言失败: mpv 没有链接 libdisplay-info.so.2 —— features['drm'] 没开,"
+    echo "  gpu-context=drm 不会有。自建的 libdisplay-info 没被探测到?"
+    exit 1 ;;
+esac
+echo "  mpv -> libdisplay-info.so.2 (drm GPU context 已开)"
 cd "$WORK"
 
 # ---- 装进 stage -----------------------------------------------
@@ -421,7 +610,7 @@ done
     | tar --null -cf - -T - ) \
   | ( cd "$STAGE/usr/local/lib" && tar xf - )
 ( cd "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu" && find . -maxdepth 1 \
-    -name 'libplacebo*' -print0 | tar --null -cf - -T - ) \
+    \( -name 'libplacebo*' -o -name 'libdisplay-info*' \) -print0 | tar --null -cf - -T - ) \
   | ( cd "$STAGE/usr/local/lib/aarch64-linux-gnu" && tar xf - )
 # 头文件和 .pc 给将来在板子上重编东西用。.pc 的 prefix 都是
 # /usr/local (configure 时定的), 和镜像里的路径一致。MPP 的
@@ -436,7 +625,7 @@ if [ -d "$INSTALL_ROOT/usr/local/lib/pkgconfig" ]; then
 fi
 
 # ldconfig 必须知道去这两个地方找, 否则 mpv 一跑就
-# "error while loading shared libraries: libplacebo.so.338"
+# "error while loading shared libraries: libplacebo.so.360"
 # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
 # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
 {
@@ -511,6 +700,11 @@ if ! ls "$STAGE"/usr/local/lib/aarch64-linux-gnu/libplacebo.so* >/dev/null 2>&1;
   exit 1
 fi
 echo "  有: libplacebo"
+if ! ls "$STAGE"/usr/local/lib/aarch64-linux-gnu/libdisplay-info.so.2* >/dev/null 2>&1; then
+  echo "断言失败: stage 里没有 libdisplay-info.so.2 —— mpv 会因为找不到它起不来"
+  exit 1
+fi
+echo "  有: libdisplay-info.so.2"
 if ! ls "$STAGE"/usr/local/lib/libavcodec.so* >/dev/null 2>&1; then
   echo "断言失败: stage 里没有 libavcodec"
   exit 1
