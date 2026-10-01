@@ -25,7 +25,7 @@
 # 镜像里需要对应的运行时包, 否则 mpv 一跑就 "libass.so.9: cannot open"。
 # bookworm 包名 (noble 有 t64 后缀变体, 换发行版时逐个对着查)。
 function post_family_config__z96a_mpv_runtime_libs() {
-	add_packages_to_image libass9 libmpg123-0 libopusfile0 libflac8 \
+	add_packages_to_image libass9 libmpg123-0 libopusfile0 libflac12 \
 		libspeex1 libvulkan1 libfribidi0 libfreetype6 libharfbuzz0b
 }
 
