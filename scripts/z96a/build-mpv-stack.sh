@@ -47,7 +47,7 @@ done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
-  python3 python3-mako python3-jinja2 \
+  python3 python3-pip python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev \
   libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libdrm-dev \
@@ -68,6 +68,60 @@ apt-get install -y --no-install-recommends \
 # (video/out/drm_common.c 里的 di_info_parse_edid / di_edid_* /
 # di_cta_*), 全是纯计算, 唯一依赖 hwdata 的 di_get_pnp_ids() mpv
 # 根本没调。
+
+# ---- meson: 必须比 bookworm 的 1.0.1 新 --------------------------------
+# mpv 0.41 的 meson.build:5 写的是 meson_version: '>=1.3.0'。Debian 12
+# 的 meson 是 **1.0.1-5**, meson 会在 setup 阶段直接报
+#   ERROR: Project requires meson version >= 1.3.0 but Meson version is 1.0.1
+# mpv 0.38 的门槛还没这么高, 所以之前几轮 CI (36871702171/36879349652)
+# 一直是过的 —— 升 mpv 才把这条线顶出来。
+#
+# 其余几个的门槛 (都查过上游 meson.build 的 project() 声明):
+#   libplacebo v7.360.1     >=0.63   ✓ 1.0.1 本来就够
+#   wayland-protocols 1.43  >=0.58   ✓
+#   libdisplay-info 0.2.0   >=0.57   ✓
+#   mpv v0.41.0             >=1.3.0  ✗
+#
+# 装法走 pip 而不是 bookworm-backports: backports 里没有可用的 meson
+# (查 dists/bookworm-backports/main/binary-arm64/Packages.gz 直接 404),
+# 而 pip 装出来是纯 Python 包, 不牵扯发行版打包。
+#
+# 版本钉 **1.12.1**, 不是"随便一个新版": 这个号正是板子上把
+# libplacebo 7.360.1 / mpv 0.41.0 / wayland-protocols 1.43 /
+# libdisplay-info 0.2.0 全部编过一遍的那个版本, 也就是除了 FFmpeg
+# 之外每个组件都已经在真硬件上验证过。用别的号就是拿 CI 去试
+# 没人试过的组合。
+#
+# 唯一未验证的组合是 FFmpeg(d90e3a1) + meson 1.12.1 —— 它之前一直跑在
+# 1.0.1 上。选"全局换新"而不是"只给 mpv 单独塞一个新 meson", 是因为
+# 那样换能凑齐 4 个已验证组合, 只留 FFmpeg 一个风险点; 要是只给 mpv
+# 换, libplacebo 7 / wayland-protocols 1.43 / libdisplay-info 0.2.0 就全
+# 退回未验证的 1.0.1, 变成三个风险点。FFmpeg 那边是活跃维护的 fork,
+# 上游自己就用较新的 meson 构建, 风险可接受。
+#
+# bookworm 有 PEP 668 的 EXTERNALLY-MANAGED 标记, 不加
+# --break-system-packages 会被 pip 拒掉。
+MESON_PIN=1.12.1
+python3 -m pip install --no-cache-dir --break-system-packages "meson==$MESON_PIN"
+# pip 把 meson 装到 /usr/local/bin, 但不显式确认的话, 前面 apt 装的
+# /usr/bin/meson 1.0.1 随时可能因为 PATH 顺序被挑中 —— 症状是 mpv 的
+# setup 阶段报版本不够, 报错位置离真正的原因十万八千里。这里当场验。
+export PATH="/usr/local/bin:$PATH"
+MESON_BIN=$(command -v meson)
+MESON_GOT=$("$MESON_BIN" --version)
+if [ "$MESON_GOT" != "$MESON_PIN" ]; then
+  echo "断言失败: 实际生效的 meson 是 $MESON_GOT ($MESON_BIN), 期望 $MESON_PIN"
+  echo "  PATH=$PATH"
+  echo "  mpv 0.41 要求 >= 1.3.0, 拿到旧的 1.0.1 会在 meson setup 直接失败"
+  exit 1
+fi
+# mpv 的硬门槛单独再钉一道: 以后有人改 MESON_PIN 时, 这里先炸,
+# 不用等 mpv 报一句语焉不详的 "Project requires meson version"
+case "$MESON_GOT" in
+  1.[3-9]*|1.[0-9][0-9]*|[2-9]*) : ;;
+  *) echo "断言失败: meson $MESON_GOT 低于 mpv 0.41 要求的 1.3.0"; exit 1 ;;
+esac
+echo "meson: $MESON_GOT ($MESON_BIN)"
 
 # ---- 版本钉死 -------------------------------------------------
 # 全部钉到具体 commit/tag, 不用分支头。上游一动这里就炸, 总比
