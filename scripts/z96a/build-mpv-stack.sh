@@ -239,6 +239,10 @@ if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc_shared.so.1" ]; then
   # 链接它时 DT_NEEDED 记录的就是 SONAME, 文件改名改不掉 SONAME
   # (release 185 之后 mpv 实测: libshaderc_shared.so.1 => not found)。
   cp "$SO" "$INSTALL_ROOT/usr/local/lib/libshaderc_shared.so.1"
+  # 链接期 -lshaderc_shared 找的是**无版本号**的 libshaderc_shared.so,
+  # 必须补一条指向 SONAME 的开发软链; 缺了它 gcc/meson 报
+  # "cannot find -lshaderc_shared" (run 36853909804 就死在 .pc 链接自检)。
+  ln -sf libshaderc_shared.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc_shared.so"
   cp -r "$WORK/shaderc-src/libshaderc/include/shaderc/." "$INSTALL_ROOT/usr/local/include/shaderc/"
   echo "shaderc 自包含版已就位: $SO"
 else
@@ -413,7 +417,7 @@ done
 # 只 cp 一层会断链。MPP 的 librockchip_mpp* 也在 lib/ 里但**不能**
 # 带: 镜像里的 MPP 由 rockchip-multimedia.sh 提供, 带过去就是两份。
 ( cd "$INSTALL_ROOT/usr/local/lib" && find . -maxdepth 1 \
-    \( -name 'libav*.so*' -o -name 'libsw*.so*' -o -name 'libshaderc.so*' \) -print0 \
+    \( -name 'libav*.so*' -o -name 'libsw*.so*' -o -name 'libshaderc_shared.so*' \) -print0 \
     | tar --null -cf - -T - ) \
   | ( cd "$STAGE/usr/local/lib" && tar xf - )
 ( cd "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu" && find . -maxdepth 1 \
