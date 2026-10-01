@@ -227,7 +227,7 @@ if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1" ]; then
         -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON \
         -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DENABLE_GLSLANG_BINARIES=OFF
   cmake --build "$WORK/shaderc-src/build" -j"$(nproc)" --target shaderc_shared
-  SO=$(find "$WORK/shaderc-src/build" -name 'libshaderc.so.1*' | head -1)
+  SO=$(find "$WORK/shaderc-src/build" -name 'libshaderc_shared.so.1*' | head -1)
   [ -n "$SO" ] || { echo "断言失败: shaderc 构建没有产出 libshaderc.so.1"; exit 1; }
   # 自包含当场验证: 未定义符号里不允许再出现 spvtools
   if nm -D --undefined-only "$SO" | grep -q spvtools; then
