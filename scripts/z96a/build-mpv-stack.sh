@@ -675,6 +675,23 @@ done
     \( -name 'libav*.so*' -o -name 'libsw*.so*' -o -name 'libshaderc_shared.so*' \) -print0 \
     | tar --null -cf - -T - ) \
   | ( cd "$STAGE/usr/local/lib" && tar xf - )
+# 上面那条 libplacebo.so.360 的 NEEDED 断言只能证明"链上了", 不能证明
+# "装在哪个目录" —— libplacebo 哪天改了 libdir (不再走 multiarch) 这条
+# 也不会炸, 而下面那个 tar 会因为空输入报
+#   tar: This does not look like a tar archive
+# 报错指向打包, 根因却是装错了地方, 极难查。这里先把目录钉住。
+if [ ! -d "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu" ]; then
+  echo "断言失败: $INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu 不存在"
+  echo "  libplacebo / libdisplay-info 没装到 multiarch 路径下 ——"
+  echo "  它们改 libdir 了? 下面的 tar 只会报 'not a tar archive'，看不出真因"
+  echo "  实际装到哪了:"
+  # 不能用 `find ... | head` —— pipefail 下 head 先退、find 收 EPIPE
+  # 返回 141, 脚本在 exit 1 之前就被掐掉, 报错正好被截掉。ls -d 无管道。
+  ls -d "$INSTALL_ROOT"/usr/local/lib*/libplacebo.so* \
+        "$INSTALL_ROOT"/usr/local/lib*/libdisplay-info.so* 2>/dev/null \
+    || echo "  (压根没找到 libplacebo / libdisplay-info)"
+  exit 1
+fi
 ( cd "$INSTALL_ROOT/usr/local/lib/aarch64-linux-gnu" && find . -maxdepth 1 \
     \( -name 'libplacebo*' -o -name 'libdisplay-info*' \) -print0 | tar --null -cf - -T - ) \
   | ( cd "$STAGE/usr/local/lib/aarch64-linux-gnu" && tar xf - )
