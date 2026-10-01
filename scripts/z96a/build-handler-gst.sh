@@ -26,7 +26,7 @@ for i in 1 2 3; do
 done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
-  build-essential meson ninja-build pkg-config bison flex curl ca-certificates \
+  build-essential meson ninja-build pkg-config bison flex git curl ca-certificates \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   libgstreamer-plugins-bad1.0-dev \
   libx11-dev libdrm-dev
