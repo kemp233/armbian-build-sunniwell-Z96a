@@ -41,7 +41,7 @@ for i in 1 2 3; do
 done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
-  nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
+  build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
   python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev libshaderc-dev \
