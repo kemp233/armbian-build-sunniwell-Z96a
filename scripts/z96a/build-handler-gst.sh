@@ -112,6 +112,12 @@ cd "$WORK"
 # 顶层 meson.build 对 disabled 的 required:false 依赖会干净跳过,
 # 所以直接不装。
 # 这些是插件编译的硬依赖, 失败就该当场红。
+apt_update_ok=0
+for i in 1 2 3; do
+  if apt-get update; then apt_update_ok=1; break; fi
+  echo "apt-get update failed, retrying (attempt $i/3)"; sleep 10
+done
+[ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
   libgstreamer-plugins-bad1.0-dev \

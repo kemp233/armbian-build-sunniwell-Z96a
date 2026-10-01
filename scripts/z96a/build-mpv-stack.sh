@@ -22,7 +22,8 @@ WORK="$PWD/.mpv-build"
 mkdir -p "$WORK"
 
 # ---- 构建依赖 -------------------------------------------------
-# 包名以 **Ubuntu noble (arm64 runner)** 为准, 不是 Debian:
+# 包名以 **Debian bookworm (arm64 容器)** 为准 (2026-10-01 从 noble
+# 名单迁移; noble 时代注释见 git 历史)。容器里必须先 apt-get update:
 #   - `libglslang-dev` 在 noble 不存在, 是 `glslang-dev`
 #     (run 36559657755 就死在 "Unable to locate package
 #     libglslang-dev", 退出码 100)
@@ -31,11 +32,19 @@ mkdir -p "$WORK"
 # Debian 的名字。
 # libplacebo 的依赖最容易漏: 少 libxxf86vm-dev 就在 meson 那里
 # "x11present not found", 少 shaderc/glslang 就在链接那里炸。
+# fresh 容器没有包索引, 必须先 update (run 36808451716 的教训:
+# 没这步所有包都是 "Unable to locate")
+apt_update_ok=0
+for i in 1 2 3; do
+  if apt-get update; then apt_update_ok=1; break; fi
+  echo "apt-get update failed, retrying (attempt $i/3)"; sleep 10
+done
+[ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
   python3-mako python3-jinja2 \
   libssl-dev \
-  libvulkan-dev libshaderc-dev glslang-dev \
+  libvulkan-dev libshaderc-dev \
   libegl1-mesa-dev libgles2-mesa-dev libgbm-dev libdrm-dev \
   libx11-dev libxrandr-dev libxcb1-dev libxcb-dri2-0-dev \
   libxcb-dri3-dev libxcb-present-dev libxcb-sync-dev \
