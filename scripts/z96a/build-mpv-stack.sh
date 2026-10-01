@@ -211,10 +211,40 @@ fi
 echo "FFmpeg rkmpp 硬解: 已启用"
 cd "$WORK"
 
+# ---- shaderc: 容器内自建自包含版 ------------------------------
+# Debian bookworm 的 libshaderc.so.1 (2023.2) 不自包含: spvtools 的
+# 193 个符号 (含 vtable _ZTVN8spvtools5utils5TimerE) 未定义且无提供者,
+# 运行时加载必炸 (release 185 装上板后 mpv 实测: symbol lookup error)。
+# noble 的 2023.8 自包含但要 GLIBC_2.38, bookworm 用不了。
+# 所以在容器里从上游源码自建: 上游把 glslang/SPIRV-Tools 静态链进
+# libshaderc.so, 产物自包含, glibc 2.36 编译即兼容。
+SHADERC_TAG=v2023.8
+if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1" ]; then
+  git clone --depth 1 --branch "$SHADERC_TAG" https://github.com/google/shaderc.git "$WORK/shaderc-src"
+  ( cd "$WORK/shaderc-src" && python3 utils/git-sync-deps )
+  cmake -S "$WORK/shaderc-src" -B "$WORK/shaderc-src/build" -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DSHADERC_SKIP_TESTS=ON -DSHADERC_SKIP_EXAMPLES=ON \
+        -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DENABLE_GLSLANG_BINARIES=OFF
+  cmake --build "$WORK/shaderc-src/build" -j"$(nproc)" --target shaderc
+  SO=$(find "$WORK/shaderc-src/build" -name 'libshaderc.so.1*' | head -1)
+  [ -n "$SO" ] || { echo "断言失败: shaderc 构建没有产出 libshaderc.so.1"; exit 1; }
+  # 自包含当场验证: 未定义符号里不允许再出现 spvtools
+  if nm -D --undefined-only "$SO" | grep -q spvtools; then
+    echo "断言失败: 自建 libshaderc 仍有未定义的 spvtools 符号"
+    exit 1
+  fi
+  mkdir -p "$INSTALL_ROOT/usr/local/lib" "$INSTALL_ROOT/usr/local/include/shaderc"
+  cp "$SO" "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1"
+  ln -sf libshaderc.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc.so"
+  cp "$WORK/shaderc-src/include/shaderc/shaderc.h" "$INSTALL_ROOT/usr/local/include/shaderc/"
+  echo "shaderc 自包含版已就位: $SO"
+else
+  echo "shaderc 已就绪, 跳过"
+fi
+
 # ---- shaderc.pc 与链接自检 ------------------------------------
-# libshaderc.so.1 已在上面从上游源码自建 (自包含, 见 "shaderc: 容器内
-# 自建自包含版"), 这里只写 .pc 并当场链接自检。Debian 的发行版 .so.1
-# 不能用 (spvtools 193 个未定义符号, release 185 板上实测)。
+# libshaderc.so.1 已在上面自建, 这里写 .pc 并当场链接自检。
 mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig"
 {
   echo 'prefix=/usr/local'
