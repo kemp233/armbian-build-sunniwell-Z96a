@@ -53,8 +53,16 @@ function pre_customize_image__z96a_mpv_toolchain() {
 	done
 
 	# 当场验收: 库、配置、插件一个都不能少。
+	#
+	# libdisplay-info.so.2 值得单独说一句: 它是 mpv v0.41 的 DT_NEEDED,
+	# 而 bookworm/noble 仓库里**没有**对应包 (是这次自建的), 少了它
+	# mpv 不是"退化成软解", 是根本起不来 —— "error while loading shared
+	# objects: libdisplay-info.so.2"。libplacebo 缺了同理。它进 overlay
+	# 是靠上面那句 `cp -a "${src}/."`, 但按本文件头的验收原则, 关键文件
+	# 一律要当场钉住, 不能靠"顺便就带过去了"。
 	for f in \
 		"usr/local/lib/aarch64-linux-gnu/libplacebo.so" \
+		"usr/local/lib/aarch64-linux-gnu/libdisplay-info.so.2" \
 		"usr/local/lib/libshaderc_shared.so.1" \
 		"root/.config/mpv/mpv.conf" \
 		"root/.config/mpv-handler/config.toml" \
