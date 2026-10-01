@@ -219,7 +219,7 @@ cd "$WORK"
 # 所以在容器里从上游源码自建: 上游把 glslang/SPIRV-Tools 静态链进
 # libshaderc.so, 产物自包含, glibc 2.36 编译即兼容。
 SHADERC_TAG=v2023.8
-if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1" ]; then
+if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc_shared.so.1" ]; then
   git clone --depth 1 --branch "$SHADERC_TAG" https://github.com/google/shaderc.git "$WORK/shaderc-src"
   ( cd "$WORK/shaderc-src" && python3 utils/git-sync-deps )
   cmake -S "$WORK/shaderc-src" -B "$WORK/shaderc-src/build" -GNinja \
@@ -228,15 +228,17 @@ if [ ! -f "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1" ]; then
         -DSHADERC_SKIP_COPYRIGHT_CHECK=ON -DENABLE_GLSLANG_BINARIES=OFF
   cmake --build "$WORK/shaderc-src/build" -j"$(nproc)" --target shaderc_shared
   SO=$(find "$WORK/shaderc-src/build" -name 'libshaderc_shared.so.1*' | head -1)
-  [ -n "$SO" ] || { echo "断言失败: shaderc 构建没有产出 libshaderc.so.1"; exit 1; }
+  [ -n "$SO" ] || { echo "断言失败: shaderc 构建没有产出 libshaderc_shared.so.1"; exit 1; }
   # 自包含当场验证: 未定义符号里不允许再出现 spvtools
   if nm -D --undefined-only "$SO" | grep -q spvtools; then
     echo "断言失败: 自建 libshaderc 仍有未定义的 spvtools 符号"
     exit 1
   fi
   mkdir -p "$INSTALL_ROOT/usr/local/lib" "$INSTALL_ROOT/usr/local/include/shaderc"
-  cp "$SO" "$INSTALL_ROOT/usr/local/lib/libshaderc.so.1"
-  ln -sf libshaderc.so.1 "$INSTALL_ROOT/usr/local/lib/libshaderc.so"
+  # 必须保留上游的真实 SONAME (libshaderc_shared.so.1): mpv/libplacebo
+  # 链接它时 DT_NEEDED 记录的就是 SONAME, 文件改名改不掉 SONAME
+  # (release 185 之后 mpv 实测: libshaderc_shared.so.1 => not found)。
+  cp "$SO" "$INSTALL_ROOT/usr/local/lib/libshaderc_shared.so.1"
   cp -r "$WORK/shaderc-src/libshaderc/include/shaderc/." "$INSTALL_ROOT/usr/local/include/shaderc/"
   echo "shaderc 自包含版已就位: $SO"
 else
@@ -255,7 +257,7 @@ mkdir -p "$INSTALL_ROOT/usr/local/lib/pkgconfig"
   echo 'Name: shaderc'
   echo 'Description: GLSL to SPIR-V compiler (shared, glslang+spvtools 已静态内含)'
   echo 'Version: 2023.8'
-  echo 'Libs: -L${libdir} -lshaderc -lpthread -lstdc++ -lm'
+  echo 'Libs: -L${libdir} -lshaderc_shared -lpthread -lstdc++ -lm'
   echo 'Cflags: -I${includedir}'
 } > "$INSTALL_ROOT/usr/local/lib/pkgconfig/shaderc.pc"
 # MPP/ffmpeg 的 DESTDIR 安装发生在上面, 此刻才有 .pc 可镜像 ——
@@ -510,8 +512,8 @@ if ! ls "$STAGE"/usr/local/lib/libavcodec.so* >/dev/null 2>&1; then
   exit 1
 fi
 echo "  有: libavcodec"
-if [ ! -e "$STAGE/usr/local/lib/libshaderc.so.1" ]; then
-  echo "断言失败: stage 里没有 libshaderc.so.1 —— libplacebo 在镜像里会加载失败"
+if [ ! -e "$STAGE/usr/local/lib/libshaderc_shared.so.1" ]; then
+  echo "断言失败: stage 里没有 libshaderc_shared.so.1 —— libplacebo 在镜像里会加载失败"
   exit 1
 fi
 echo "  有: libshaderc.so.1"
