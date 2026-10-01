@@ -370,6 +370,7 @@ jobs:
             our-repo/extensions/
             our-repo/blobs/
             our-repo/custom/
+            our-repo/scripts/
             our-repo/userpatches/
             our-repo/lib/functions/rootfs/rootfs-create.sh
             our-repo/lib/functions/rootfs/apt-install.sh
@@ -443,7 +444,7 @@ jobs:
           mkdir -p custom
 
           # Mirror the complete-artifact action's full repository staging chain.
-          for dir in config patch packages extensions blobs; do
+          for dir in config patch packages extensions blobs scripts; do
             if [ -d "armbian-custom/$dir" ]; then
               mkdir -p "custom/$dir"
               rsync -a "armbian-custom/$dir/" "custom/$dir/"
@@ -491,7 +492,7 @@ jobs:
           done
 
           # Synchronize the staged customizations into the cloned framework.
-          for dir in config patch packages extensions; do
+          for dir in config patch packages extensions scripts; do
             mkdir -p "$dir"
             rsync -a "custom/$dir/" "$dir/"
           done
