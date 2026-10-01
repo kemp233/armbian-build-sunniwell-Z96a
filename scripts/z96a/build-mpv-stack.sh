@@ -622,26 +622,33 @@ DESTDIR="$INSTALL_ROOT" meson install -C build
 #    文件也都在的情况下报 "libplacebo.so.XXX: cannot open shared object
 #    file"。这里当场钉死, 比在板上查一小时强。
 MPV_NEEDED=$(objdump -p "$INSTALL_ROOT/usr/local/bin/mpv" | awk '/NEEDED/{print $2}')
-case " $MPV_NEEDED " in
-  *" libplacebo.so.360 "*) ;;
-  *)
-    echo "断言失败: mpv 没有链接 libplacebo.so.360, 实际是:"
-    echo "$MPV_NEEDED" | grep -i placebo || echo "  (一条都没链接!)"
-    echo "  libplacebo $LIBPLACEBO_TAG 的 soname 应当是 360"
-    exit 1 ;;
-esac
+# 用 `grep -qx` 整行精确匹配, **不要**写成
+#     case " $MPV_NEEDED " in *" libplacebo.so.360 "*) ;;
+# 那种写法看着像在匹配, 其实永远不成立: $MPV_NEEDED 是**多行**字符串
+# (mpv 连十几个库), 行与行之间是换行而不是空格, 而那个 pattern 要求
+# 目标前后都得是空格。run 36912881289 就是这么炸的 —— 报错说
+# "mpv 没有链接 libplacebo.so.360", 紧跟着自己又把
+# libplacebo.so.360 打了出来, 自相矛盾。
+# 用 here-string 而不是 `printf ... | grep`: 后者在 set -o pipefail 下
+# 有 SIGPIPE 141 的坑 (grep -q 命中即退, printf 收 EPIPE)。
+if ! grep -qx 'libplacebo\.so\.360' <<< "$MPV_NEEDED"; then
+  echo "断言失败: mpv 没有链接 libplacebo.so.360, 实际是:"
+  grep -i placebo <<< "$MPV_NEEDED" || echo "  (一条都没链接!)"
+  echo "  libplacebo $LIBPLACEBO_TAG 的 soname 应当是 360"
+  exit 1
+fi
 echo "  mpv -> libplacebo.so.360"
 # 2) libdisplay-info: 它是 drm GPU context 的唯一 gate
 #    (meson.build:958-962), 缺了就没有 gpu-context=drm, 而且
 #    mpv 二进制少一条 DT_NEEDED。这条同时兜住上面 wayland-protocols /
 #    libdisplay-info 两个新段有没有真的生效。
-case " $MPV_NEEDED " in
-  *" libdisplay-info.so.2 "*) ;;
-  *)
-    echo "断言失败: mpv 没有链接 libdisplay-info.so.2 —— features['drm'] 没开,"
-    echo "  gpu-context=drm 不会有。自建的 libdisplay-info 没被探测到?"
-    exit 1 ;;
-esac
+# 同上一条, 这里也必须是整行精确匹配 —— 换行分隔的多行列表里,
+# `case " $MPV_NEEDED "` 那种空格包边的 pattern 同样永远不成立。
+if ! grep -qx 'libdisplay-info\.so\.2' <<< "$MPV_NEEDED"; then
+  echo "断言失败: mpv 没有链接 libdisplay-info.so.2 —— features['drm'] 没开,"
+  echo "  gpu-context=drm 不会有。自建的 libdisplay-info 没被探测到?"
+  exit 1
+fi
 echo "  mpv -> libdisplay-info.so.2 (drm GPU context 已开)"
 cd "$WORK"
 
