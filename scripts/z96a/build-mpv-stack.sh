@@ -47,7 +47,7 @@ done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
-  libluajit-5.1-dev \
+  libluajit-5.1-dev libpulse-dev libasound2-dev \
   python3 python3-pip python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev \
