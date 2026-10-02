@@ -770,6 +770,10 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
   echo 'hwdec=rkmpp-copy'
   echo 'gpu-api=opengl'
   echo 'vo=gpu'
+  # B站/YouTube 常给 AV1 流, RK3568 无 AV1 硬解; b 只匹配音视频合一
+  # 格式 (B站全是分离流, b 直接 "Requested format is not available"),
+  # 要用 bv*。优先 avc1 (H.264, rkmpp 硬解实测), 回退排除 av01。
+  echo 'ytdl-format=bv*[vcodec^=avc1]+ba/bv*[vcodec!^=av01]+ba/b'
 } > "$STAGE/root/.config/mpv/mpv.conf"
 
 # ---- 自检: 产物齐不齐 ----------------------------------------
