@@ -47,7 +47,7 @@ function pre_customize_image__z96a_mpv_toolchain() {
 		"usr/local/bin/ffmpeg" \
 		"usr/local/bin/ffprobe" \
 		"usr/local/bin/yt-dlp" \
-		"root/.local/bin/mpv-handler"; do
+		"usr/local/bin/mpv-handler"; do
 		[[ -e "${SDCARD}/${f}" ]] || exit_with_error "Z96A mpv toolchain: overlay 里缺 ${f}"
 		run_host_command_logged chmod 755 "${SDCARD}/${f}"
 	done
