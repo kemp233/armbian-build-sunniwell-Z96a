@@ -778,9 +778,11 @@ du -sh "$STAGE"
 # lua 必须编进 mpv: ytdl_hook 是 Lua 脚本, Play with MPV 靠它调
 # yt-dlp 解析 B站/YouTube 网页。没 lua 的 mpv 直接播 URL 会
 # "Failed to recognize file format" (release 200 板上实测)。
-# 注意: ytdl_hook 的 Lua 源码无论是否启用 lua 都会嵌进二进制,
-# strings 检查必然假阳性 —— 必须真的跑一次 --list-options。
-if ! "$STAGE/usr/local/bin/mpv" --no-config --list-options 2>/dev/null | grep -q "^--ytdl"; then
+# 注意两点: ytdl_hook 的 Lua 源码无论是否启用 lua 都会嵌进二进制
+# (strings 必然假阳性); 而在容器里裸跑 mpv 缺 INSTALL_ROOT 的库路径,
+# 进程根本起不来 (--list-options 必挂, run 36961354049 的教训)。
+# lua 启用与否看动态链接: mpv 链 libluajit = ytdl_hook 会加载。
+if ! ldd "$STAGE/usr/local/bin/mpv" | grep -q luajit; then
   echo "断言失败: mpv 没编进 ytdl_hook (lua 缺失) -- Play with MPV 会废"
   exit 1
 fi
