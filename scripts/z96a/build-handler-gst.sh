@@ -61,17 +61,34 @@ cargo build --release
 [ -f target/release/mpv-handler ] || {
   echo "断言失败: cargo 没产出 mpv-handler"; exit 1; }
 
-# 装进 stage。注意它是个**用户级**安装 (README 的 Manual installation),
-# 桌面会话是 root, 所以路径全在 root 家目录下。
-mkdir -p "$STAGE/root/.local/bin" \
+# 装进 stage。**二进制必须进 /usr/local/bin**: glib 加载 .desktop 时会
+# 验证 Exec 的可执行文件在 PATH 里, Exec=mpv-handler 而二进制在
+# ~/.local/bin (不在 PATH) 的话, 整个 .desktop 被 glib 当不存在 ——
+# gio "No default applications"、浏览器点 Play with MPV 毫无反应
+# (板上实测, gio/get_all 里都看不到这个 desktop 文件)。desktop 文件
+# 仍留在 ~/.local/share/applications (用户级安装语义), Exec 改绝对路径。
+mkdir -p "$STAGE/usr/local/bin" \
          "$STAGE/root/.local/share/applications" \
          "$STAGE/root/.config/mpv-handler"
-cp -a target/release/mpv-handler "$STAGE/root/.local/bin/mpv-handler"
-chmod 0755 "$STAGE/root/.local/bin/mpv-handler"
+cp -a target/release/mpv-handler "$STAGE/usr/local/bin/mpv-handler"
+chmod 0755 "$STAGE/usr/local/bin/mpv-handler"
 cp -a share/linux/mpv-handler.desktop \
       "$STAGE/root/.local/share/applications/mpv-handler.desktop"
 cp -a share/linux/mpv-handler-debug.desktop \
       "$STAGE/root/.local/share/applications/mpv-handler-debug.desktop"
+sed -i 's|^Exec=mpv-handler |Exec=/usr/local/bin/mpv-handler |' \
+  "$STAGE/root/.local/share/applications/mpv-handler.desktop" \
+  "$STAGE/root/.local/share/applications/mpv-handler-debug.desktop"
+# 协议注册: 上游 .desktop 的 MimeType 是 x-scheme-handler/mpv-handler,
+# 浏览器扩展打开的也是 mpv-handler:// 协议 (protocol.rs 里只认这个
+# 前缀); 手写的 x-scheme-handler/mpv 注册 glib 不认, 在这里一并写进
+# mimeapps.list, 免得依赖桌面首登脚本。
+mkdir -p "$STAGE/root/.config"
+{
+  echo '[Default Applications]'
+  echo 'x-scheme-handler/mpv=mpv-handler.desktop'
+  echo 'x-scheme-handler/mpv-handler=mpv-handler.desktop'
+} > "$STAGE/root/.config/mimeapps.list"
 
 # mpv-handler 的配置。它的 config.toml 支持 proxy 字段 —— 这正好
 # 是"打开油管没反应"的正解: 不必去改系统级环境变量, 直接让这个
