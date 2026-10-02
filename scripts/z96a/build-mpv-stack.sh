@@ -47,6 +47,7 @@ done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
+  libluajit-5.1-dev \
   python3 python3-pip python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev \
@@ -597,6 +598,7 @@ meson setup build \
   -Dprefix=/usr/local \
   -Dgpl=true \
   -Dlibmpv=true \
+            -Dlua=luajit \
   -Dtests=false \
   -Dmanpage-build=disabled \
   -Dwayland=enabled \
@@ -773,6 +775,13 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 # ---- 自检: 产物齐不齐 ----------------------------------------
 echo "=== stage 大小 ==="
 du -sh "$STAGE"
+# lua 必须编进 mpv: ytdl_hook 是 Lua 脚本, Play with MPV 靠它调
+# yt-dlp 解析 B站/YouTube 网页。没 lua 的 mpv 直接播 URL 会
+# "Failed to recognize file format" (release 200 板上实测)。
+if ! strings "$STAGE/usr/local/bin/mpv" | grep -q "ytdl_hook"; then
+  echo "断言失败: mpv 没编进 ytdl_hook (lua 缺失) -- Play with MPV 会废"
+  exit 1
+fi
 for must in usr/local/bin/mpv usr/local/bin/ffmpeg usr/local/bin/yt-dlp \
            root/.config/mpv/mpv.conf etc/ld.so.conf.d/zz-armbian-local.conf \
            etc/udev/rules.d/50-z96a-multimedia.rules; do
