@@ -79,6 +79,13 @@ cp -a share/linux/mpv-handler-debug.desktop \
 sed -i 's|^Exec=mpv-handler |Exec=/usr/local/bin/mpv-handler |' \
   "$STAGE/root/.local/share/applications/mpv-handler.desktop" \
   "$STAGE/root/.local/share/applications/mpv-handler-debug.desktop"
+# debug 变体上游带 Terminal=true (要让人看调试输出): glib 对
+# Terminal=true 的 .desktop 用 gnome-terminal 包一层启动 —— 浏览器扩展
+# 的菜单项走的就是 debug 协议 (Firefox handlers.json 实测记着
+# mpv-handler-debug), 结果就是点 Play with MPV 弹一个 terminal。板上
+# 实测关掉后 mpv 窗口直接弹出。
+sed -i 's/^Terminal=true/Terminal=false/' \
+  "$STAGE/root/.local/share/applications/mpv-handler-debug.desktop"
 # 协议注册: 上游 .desktop 的 MimeType 是 x-scheme-handler/mpv-handler,
 # 浏览器扩展打开的也是 mpv-handler:// 协议 (protocol.rs 里只认这个
 # 前缀); 手写的 x-scheme-handler/mpv 注册 glib 不认, 在这里一并写进
