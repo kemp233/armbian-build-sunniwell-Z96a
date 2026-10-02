@@ -236,13 +236,13 @@ find "$STAGE" -name 'librockchip_mpp*' -print -delete || true
 find "$STAGE" -name 'rockchip_*.pc' -print -delete || true
 
 # ---- 自检 ------------------------------------------------------
-if [ ! -x "$STAGE/root/.local/bin/mpv-handler" ]; then
-  echo "断言失败: stage 里没有 mpv-handler"; exit 1
+if [ ! -x "$STAGE/usr/local/bin/mpv-handler" ]; then
+  echo "断言失败: stage 里没有 mpv-handler (应在 usr/local/bin)"; exit 1
 fi
 if [ ! -f "$STAGE/root/.config/mpv-handler/config.toml" ]; then
   echo "断言失败: stage 里没有 mpv-handler 的 config.toml"; exit 1
 fi
-echo "  有: root/.local/bin/mpv-handler"
+echo "  有: usr/local/bin/mpv-handler"
 echo "  有: root/.config/mpv-handler/config.toml"
 if ! find "$STAGE" -name 'libgstrockchi*.so' -print -quit | grep -q .; then
   echo "断言失败: stage 里没有 gstreamer rockchipmpp 插件"
