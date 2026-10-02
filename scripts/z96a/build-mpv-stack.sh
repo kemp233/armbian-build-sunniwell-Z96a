@@ -754,14 +754,18 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 "$STAGE/usr/local/bin/yt-dlp" --version
 
 # ---- 默认配置 ------------------------------------------------
-# hwdec=rkmpp 是硬解的开关。vo=gpu 走 libplacebo -> EGL -> Mali,
-# gpu-api=opengl 不能换成 vulkan: 这台板子上 Vulkan 只有 llvmpipe,
-# 换过去反而变软解。
+# hwdec=rkmpp-copy 是硬解的开关。**必须用 copy 变体**: 主线 mpv 0.41 的
+# 直通 (rkmpp) 路径要求 VO 提供 rkmpp 设备上下文 (hwdec_devs), 而
+# vo=gpu 不提供 —— 板上桌面会话实测 "Could not create device" 后静默
+# 回落软解。copy 变体自己调 av_hwdevice_ctx_create 建设备 (板上实测
+# "Using hardware decoding (rkmpp-copy)"), 代价是解码帧回拷一次, 对
+# A55 可忽略。vo=gpu 走 libplacebo -> EGL -> Mali, gpu-api=opengl
+# 不能换成 vulkan: 这台板子上 Vulkan 只有 llvmpipe。
 # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
 # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
 {
   echo '# 板子上实测: 硬解 17.2% CPU, 软解 90.8%。'
-  echo 'hwdec=rkmpp'
+  echo 'hwdec=rkmpp-copy'
   echo 'gpu-api=opengl'
   echo 'vo=gpu'
 } > "$STAGE/root/.config/mpv/mpv.conf"
