@@ -218,7 +218,7 @@ grep -n 'video/x-h265\|video/x-av1\|video/x-vp9' "$DEC_SRC" | head -6
 # auto_features 的话会连着把 bad 插件的几十个无关组件一起编,
 # 光那部分就要几十分钟。只要 rockchipmpp 这一个。
 # meson_options.txt 与 resi-labs 版逐字相同, 参数直接照搬。
-meson setup build \
+meson setup build --buildtype=release \
   -Dauto_features=disabled \
   -Drockchipmpp=enabled \
   -Drkximage=disabled \

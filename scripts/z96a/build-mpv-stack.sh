@@ -594,7 +594,7 @@ python3 "$SCRIPT_DIR/patch-mpv-rkmpp-hwdec.py" "$PWD"
 # **不能**动 x11: 强行 -Dx11=enabled 会牵出 libXss/libXpresent
 # (meson.build:1089-1091), 容器里没装, 直接 xscrnsaver not found。
 # x11 留 auto, 探测不到就关掉, 对这个 Wayland/GNOME 镜像无影响。
-meson setup build \
+meson setup build --buildtype=release \
   -Dprefix=/usr/local \
   -Dgpl=true \
   -Dlibmpv=true \
