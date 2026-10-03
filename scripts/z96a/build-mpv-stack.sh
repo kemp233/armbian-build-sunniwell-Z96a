@@ -773,7 +773,10 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
   # B站/YouTube 常给 AV1 流, RK3568 无 AV1 硬解; b 只匹配音视频合一
   # 格式 (B站全是分离流, b 直接 "Requested format is not available"),
   # 要用 bv*。优先 avc1 (H.264, rkmpp 硬解实测), 回退排除 av01。
-  echo 'ytdl-format=bv*[vcodec^=avc1]+ba/bv*[vcodec!^=av01]+ba/b'
+  echo 'ytdl-format=bv*[vcodec^=avc1]+ba/bv*[vcodec^=vp9]+ba/bv*[vcodec!^=av01]+ba/b'
+  echo '# ytdl_hook 调 yt-dlp 时不带代理 -- YouTube 直连超时挂死 (板上实测:'
+  echo '# yt-dlp 直连 124 失败 / 带 --proxy 0 成功)。写死在配置里兜底。'
+  echo 'ytdl-raw-options=proxy=http://192.168.50.211:7893'
 } > "$STAGE/root/.config/mpv/mpv.conf"
 
 # ---- 自检: 产物齐不齐 ----------------------------------------
