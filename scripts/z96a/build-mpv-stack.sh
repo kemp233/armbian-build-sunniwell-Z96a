@@ -791,18 +791,23 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 # mpv 退出时自动恢复播放。mpv 自动加载 ~/.config/mpv/scripts/ 下的 Lua。
 mkdir -p "$STAGE/root/.config/mpv/scripts"
 cat > "$STAGE/root/.config/mpv/scripts/pause-firefox.lua" << 'LUAEOF'
+-- playerctl -a 遍历时对 Firefox 实例可能不生效 (B站页面用内嵌
+-- audio 元素), 逐实例指定 -p 实测可靠。mpv 退出时恢复播放。
 local utils = require 'mp.utils'
 
-local function firefox_pause()
-    utils.subprocess({ args = { 'playerctl', '-a', 'pause' }, playback_only = false })
+local function set_players(state)
+    local r = utils.subprocess({ args = { 'playerctl', '--list-all' },
+                                 capture_stdout = true })
+    if r.status == 0 then
+        for player in string.gmatch(r.stdout or '', '%S+') do
+            utils.subprocess({ args = { 'playerctl', '-p', player, state },
+                               playback_only = false })
+        end
+    end
 end
 
-local function firefox_resume()
-    utils.subprocess({ args = { 'playerctl', '-a', 'play' }, playback_only = false })
-end
-
-mp.add_hook('on_preloaded', firefox_pause)
-mp.register_event('shutdown', firefox_resume)
+mp.add_hook('on_preloaded', function() set_players('pause') end)
+mp.register_event('shutdown', function() set_players('play') end)
 LUAEOF
 
 # ---- 自检: 产物齐不齐 ----------------------------------------
