@@ -553,6 +553,15 @@ echo "  wayland-protocols: $WP_VER (pkgdatadir 落在 INSTALL_ROOT 里)"
 # 实际跑起来才崩的东西。
 git clone --depth 1 --branch "$MPV_TAG" https://github.com/mpv-player/mpv.git mpv
 cd mpv
+# rkmpp 直通补丁: hwdec=rkmpp (非 copy) 时自建 RKMPP 设备。vo=gpu 不注册
+# RKMPP 设备, 主线直通路径必然 "Could not create device" 回落软解 ——
+# 这个补丁让解码器直出 drmprime, 由 vo/gpu 的 dmabuf-interop-gl 接收
+# (mali EGL 导入 NV12 dmabuf 已用探针验证)。回拷消除后 CPU 预期 50%→25%。
+if [ -f /work/scripts/z96a/mpv-rkmpp-direct.patch ]; then
+  git apply /work/scripts/z96a/mpv-rkmpp-direct.patch \
+    && echo "rkmpp 直通补丁已应用" \
+    || { echo "断言失败: rkmpp 直通补丁打不上 (mpv 源码变了?)"; exit 1; }
+fi
 # (1)(2) 原来那两个 FFmpeg 7.x 的 API 补丁 —— mpv 0.41 自己已经不用
 # 那两个旧符号了 (ad_spdif.c / demux_mkv.c 里 FF_PROFILE_ 残留 0 处,
 # demux_lavf.c 里 av_format_inject_global_side_data 0 处), 所以补丁本身
@@ -766,8 +775,8 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
 # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
 {
-  echo '# 板子上实测: 硬解 17.2% CPU, 软解 90.8%。'
-  echo 'hwdec=rkmpp-copy'
+  echo '# 板子上实测: rkmpp-copy 硬解 51%, 直通(本补丁)预期 17~25%。'
+  echo 'hwdec=rkmpp'
   echo 'gpu-api=opengl'
   echo 'vo=gpu'
   # B站/YouTube 常给 AV1 流, RK3568 无 AV1 硬解; b 只匹配音视频合一

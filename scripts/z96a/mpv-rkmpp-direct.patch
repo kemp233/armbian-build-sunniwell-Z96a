@@ -1,0 +1,29 @@
+diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
+index 399e1d5..f5adcb4 100644
+--- a/video/decode/vd_lavc.c
++++ b/video/decode/vd_lavc.c
+@@ -460,6 +460,24 @@ static AVBufferRef *hwdec_create_dev(struct mp_filter *vd,
+     vd_ffmpeg_ctx *ctx = vd->priv;
+     mp_assert(hwdec->lavc_device);
+ 
++    // Rockchip MPP zero-copy path: vo=gpu never registers an RKMPP device
++    // in hwdec_devs, so the direct (non-copy) variant would always fall
++    // back to software decoding. Create the device ourselves, same as the
++    // copying path does. Frames stay in DRM PRIME and are imported by
++    // vo/gpu's dmabuf-interop-gl (verified on RK3568/Mali-G52: the driver
++    // accepts NV12 dmabuf imports with correct plane attrs).
++    if (hwdec->lavc_device == AV_HWDEVICE_TYPE_RKMPP && !hwdec->copying) {
++        AVBufferRef *ref = NULL;
++        int err = av_hwdevice_ctx_create(&ref, AV_HWDEVICE_TYPE_RKMPP,
++                                         NULL, NULL, 0);
++        if (err < 0) {
++            MP_VERBOSE(vd, "RKMPP direct device creation failed (%d)\n", err);
++            return NULL;
++        }
++        MP_VERBOSE(vd, "RKMPP direct device created (zero-copy path)\n");
++        return ref;
++    }
++
+     if (hwdec->copying) {
+         const struct hwcontext_fns *fns =
+             hwdec_get_hwcontext_fns(hwdec->lavc_device);
