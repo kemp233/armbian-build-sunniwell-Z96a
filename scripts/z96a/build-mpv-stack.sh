@@ -791,15 +791,16 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 # mpv 退出时自动恢复播放。mpv 自动加载 ~/.config/mpv/scripts/ 下的 Lua。
 mkdir -p "$STAGE/root/.config/mpv/scripts"
 cat > "$STAGE/root/.config/mpv/scripts/pause-firefox.lua" << 'LUAEOF'
--- playerctl -a 遍历时对 Firefox 实例可能不生效 (B站页面用内嵌
--- audio 元素), 逐实例指定 -p 实测可靠。mpv 退出时恢复播放。
+-- Play with MPV 启动时暂停 Firefox 页内视频 (MPRIS), 退出时恢复。
+-- playerctl 输出可能混入非播放器行, 只对 firefox 实例操作。
 local utils = require 'mp.utils'
 
 local function set_players(state)
     local r = utils.subprocess({ args = { 'playerctl', '--list-all' },
                                  capture_stdout = true })
-    if r.status == 0 then
-        for player in string.gmatch(r.stdout or '', '%S+') do
+    if r.status ~= 0 then return end
+    for player in string.gmatch(r.stdout or '', '%S+') do
+        if string.find(player, 'firefox') then
             utils.subprocess({ args = { 'playerctl', '-p', player, state },
                                playback_only = false })
         end
