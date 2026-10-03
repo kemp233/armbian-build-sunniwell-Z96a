@@ -47,7 +47,7 @@ done
 [ "$apt_update_ok" = 1 ] || exit 1
 apt-get install -y --no-install-recommends \
   build-essential nasm yasm meson ninja-build cmake pkg-config git curl ca-certificates \
-  libluajit-5.1-dev libpulse-dev libasound2-dev \
+  libluajit-5.1-dev libpulse-dev libasound2-dev playerctl \
   python3 python3-pip python3-mako python3-jinja2 \
   libssl-dev \
   libvulkan-dev \
@@ -765,13 +765,11 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
 "$STAGE/usr/local/bin/yt-dlp" --version
 
 # ---- 默认配置 ------------------------------------------------
-# hwdec=rkmpp-copy 是硬解的开关。**必须用 copy 变体**: 主线 mpv 0.41 的
-# 直通 (rkmpp) 路径要求 VO 提供 rkmpp 设备上下文 (hwdec_devs), 而
-# vo=gpu 不提供 —— 板上桌面会话实测 "Could not create device" 后静默
-# 回落软解。copy 变体自己调 av_hwdevice_ctx_create 建设备 (板上实测
-# "Using hardware decoding (rkmpp-copy)"), 代价是解码帧回拷一次, 对
-# A55 可忽略。vo=gpu 走 libplacebo -> EGL -> Mali, gpu-api=opengl
-# 不能换成 vulkan: 这台板子上 Vulkan 只有 llvmpipe。
+# hwdec=rkmpp 是零拷贝直通 (mpv-rkmpp-direct.patch): 解码器自建 RKMPP
+# 设备, 直出 DRM PRIME, vo=gpu 的 dmabuf-interop-gl 导入 mali 纹理。
+# 板上实测 rkvdec 利用率 4~13%, YouTube 播放 mpv CPU 8.9%。
+# vo=gpu 走 libplacebo -> EGL -> Mali, gpu-api=opengl 不能换成 vulkan:
+# 这台板子上 Vulkan 只有 llvmpipe。
 # heredoc 会把 YAML 块标量截断 (heredoc 体顶格 <= 块缩进),
 # 所以这里用 echo 组写文件, 全部行都留在 run 块内。
 {
@@ -787,6 +785,25 @@ chmod +x "$STAGE/usr/local/bin/yt-dlp"
   echo '# yt-dlp 直连 124 失败 / 带 --proxy 0 成功)。写死在配置里兜底。'
   echo 'ytdl-raw-options=proxy=http://192.168.50.211:7893'
 } > "$STAGE/root/.config/mpv/mpv.conf"
+
+# pause-firefox.lua: Play with MPV 启动时通过 Firefox 的 MPRIS 接口
+# 暂停页内视频, 释放 CPU 给 mpv (Firefox 同屏渲染会让 mpv 冲到 116%);
+# mpv 退出时自动恢复播放。mpv 自动加载 ~/.config/mpv/scripts/ 下的 Lua。
+mkdir -p "$STAGE/root/.config/mpv/scripts"
+cat > "$STAGE/root/.config/mpv/scripts/pause-firefox.lua" << 'LUAEOF'
+local utils = require 'mp.utils'
+
+local function firefox_pause()
+    utils.subprocess({ args = { 'playerctl', '-a', 'pause' }, playback_only = false })
+end
+
+local function firefox_resume()
+    utils.subprocess({ args = { 'playerctl', '-a', 'play' }, playback_only = false })
+end
+
+mp.add_hook('on_preloaded', firefox_pause)
+mp.register_event('shutdown', firefox_resume)
+LUAEOF
 
 # ---- 自检: 产物齐不齐 ----------------------------------------
 echo "=== stage 大小 ==="
