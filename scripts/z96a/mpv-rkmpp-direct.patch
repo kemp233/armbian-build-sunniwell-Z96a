@@ -1,8 +1,8 @@
 diff --git a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
-index 399e1d5..f5adcb4 100644
+index 399e1d5..5000357 100644
 --- a/video/decode/vd_lavc.c
 +++ b/video/decode/vd_lavc.c
-@@ -460,6 +460,24 @@ static AVBufferRef *hwdec_create_dev(struct mp_filter *vd,
+@@ -460,6 +460,36 @@ static AVBufferRef *hwdec_create_dev(struct mp_filter *vd,
      vd_ffmpeg_ctx *ctx = vd->priv;
      mp_assert(hwdec->lavc_device);
  
@@ -19,6 +19,18 @@ index 399e1d5..f5adcb4 100644
 +        if (err < 0) {
 +            MP_VERBOSE(vd, "RKMPP direct device creation failed (%d)\n", err);
 +            return NULL;
++        }
++        // h264_rkmpp/hevc_rkmpp are full wrapper decoders with no hwaccel
++        // struct, so avcodec_get_hw_frames_parameters() always returns
++        // ENOENT and mpv's get_format_hwdec (init_generic_hwaccel →
++        // use_hw_frames) fails with ff_get_format -1. Force the device-only
++        // path: the wrapper allocates MPP frames internally and outputs
++        // DRM_PRIME, which vo/gpu imports via dmabuf-interop-gl (verified
++        // on RK3568/Mali-G52 with an independent probe).
++        if (hwdec->use_hw_frames) {
++            hwdec->use_hw_frames = false;
++            hwdec->use_hw_device = true;
++            MP_VERBOSE(vd, "RKMPP zero-copy: switched to device-only path\n");
 +        }
 +        MP_VERBOSE(vd, "RKMPP direct device created (zero-copy path)\n");
 +        return ref;
