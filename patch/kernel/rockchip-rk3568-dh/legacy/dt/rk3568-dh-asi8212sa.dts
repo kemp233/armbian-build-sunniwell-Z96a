@@ -30,8 +30,10 @@
 	aliases {
 		ethernet0 = &gmac0;
 		ethernet1 = &gmac1;
-		mmc0 = &sdhci;
-		mmc1 = &sdmmc0;
+		/* TF(SD) = mmc0 (matches U-Boot numbering); root= uses PARTUUID
+		 * so SD-first and eMMC installs both work */
+		mmc0 = &sdmmc0;
+		mmc1 = &sdhci;
 		serial2 = &uart2;
 	};
 
