@@ -59,6 +59,7 @@ on:
         - z96a-rk3568-usb302-laptop
         - z96a-rk3568-usb311-laptop
         - lb2004-rk3566
+        - dh-asi8212sa
         - armsom-sige7
         - armsom-w3
         - bananapi
