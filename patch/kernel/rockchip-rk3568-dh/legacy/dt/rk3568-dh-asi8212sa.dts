@@ -79,6 +79,16 @@
 		regulator-max-microvolt = <1800000>;
 	};
 
+	/* eDP panel rail — factory rails unknown; assume 3.3V always-on */
+	vcc_panel: regulator-vcc-panel {
+		compatible = "regulator-fixed";
+		regulator-name = "vcc_panel";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+	};
+
 	/*
 	 * Dahua reboot-mode magics — verbatim from the factory dtbo fragment
 	 * (mode-normal=0x5242c300 ... mode-charge=0x5242c30b).
@@ -94,9 +104,40 @@
 		mode-charge = <0x5242c30b>;
 	};
 
+	/*
+	 * Factory Android apps query DRM connectors "card0-DP-1" (eDP panel)
+	 * and "card0-HDMI-A-1"; factory U-Boot selects rk3568-{qbt,kqj,
+	 * kqj-15inch}-edp.dtb from an ADC LCD-ID. Panel is eDP on vp0.
+	 * Factory kernel DTB (panel timing) was never recovered — generic
+	 * 1920x1080@60 eDP timing as the first attempt.
+	 */
+	edp_panel: edp-panel {
+		compatible = "simple-panel";
+		power-supply = <&vcc_panel>;
+		panel-timing {
+			clock-frequency = <141400000>;
+			hactive = <1920>;
+			vactive = <1080>;
+			hfront-porch = <48>;
+			hback-porch = <80>;
+			hsync-len = <32>;
+			vfront-porch = <3>;
+			vback-porch = <23>;
+			vsync-len = <5>;
+			hsync-active = <0>;
+			vsync-active = <0>;
+			de-active = <1>;
+			pixelclk-active = <0>;
+		};
+		port {
+			panel_in_edp: endpoint {
+				remote-endpoint = <&edp_out_panel>;
+			};
+		};
+	};
+
 	/* Recovery/MASKROM key on SARADC ch0 (factory: press < 9uV) */
-	adc-keys {
-		compatible = "adc-keys";
+	adc-keys {		compatible = "adc-keys";
 		io-channels = <&saradc 0>;
 		io-channel-names = "buttons";
 		keyup-threshold-microvolt = <1800000>;
@@ -113,6 +154,75 @@
 
 /* Debug console, 1.5MBaud */
 &uart2 {
+	status = "okay";
+};
+
+/* ===== Display pipeline: VOP2 (vp0) -> eDP @fe0c0000 -> panel ===== */
+&vop {
+	status = "okay";
+};
+
+&vop_mmu {
+	status = "okay";
+};
+
+&edp_phy {
+	status = "okay";
+};
+
+&edp {
+	status = "okay";
+	ports {
+		port@0 {
+			edp_in_vp0: endpoint@0 {
+				status = "okay";
+			};
+		};
+		port@1 {
+			reg = <1>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			edp_out_panel: endpoint {
+				remote-endpoint = <&panel_in_edp>;
+			};
+		};
+	};
+};
+
+&display_subsystem {
+	route {
+		route_edp {
+			status = "okay";
+			logo,mode = "center";
+			charge_logo,mode = "center";
+			connect = <&vp0_out_edp>;
+		};
+	};
+};
+
+/* ===== WiFi: AP6236 (BCM43438A0) on SDIO sdmmc1 (bcmdhd + fw_bcm43438a0 in factory vendor) ===== */
+&sdmmc1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	bus-width = <4>;
+	cap-sdio-irq;
+	keep-power-in-suspend;
+	non-removable;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc1_clk &sdmmc1_cmd &sdmmc1_bus4>;
+	status = "okay";
+
+	sdwifi: wifi@1 {
+		compatible = "brcm,bcm4329-fmac";
+		reg = <1>;
+	};
+};
+
+wireless_wlan: wireless-wlan {
+	compatible = "wlan-platdata";
+	rockchip,grf = <&grf>;
+	wifi_chip_type = "ap6236";
+	sdio_vref = <1800>;
 	status = "okay";
 };
 
