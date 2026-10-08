@@ -195,7 +195,7 @@
 	};
 };
 
-/* ===== WiFi: AP6236 (BCM43438A0) on SDIO sdmmc1 (bcmdhd + fw_bcm43438a0 in factory vendor) ===== */
+/* ===== WiFi: AP6236 (BCM43438A0) on SDIO sdmmc1 ===== */
 &sdmmc1 {
 	#address-cells = <1>;
 	#size-cells = <0>;
@@ -231,6 +231,13 @@
 	status = "okay";
 };
 
+&mdio0 {
+	rgmii_phy0: ethernet-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0>;
+	};
+};
+
 /*
  * GMAC1 (M1 pins) — factory values: RGMII, clock_in_out=output,
  * tx_delay=0x4f, rx_delay=0x26, PHY reset GPIO2_D1 active-low, PHY@0 on mdio1.
@@ -255,27 +262,76 @@
 	status = "okay";
 };
 
-/* SDMMC0 — SD card (U-Boot mmc0) */
-&sdmmc0 {
-	bus-width = <4>;
-	cap-sd-highspeed;
-	cap-mmc-highspeed;
-	max-frequency = <150000000>;
-	pinctrl-0 = <&sdmmc0_clk &sdmmc0_cmd &sdmmc0_bus4>;
+&mdio1 {
+	rgmii_phy1: ethernet-phy@0 {
+		compatible = "ethernet-phy-ieee802.3-c22";
+		reg = <0>;
+	};
+};
+
+/* eMMC — HS200 8-bit, 200MHz max (factory values) */
+&sdhci {
+	bus-width = <8>;
+	max-frequency = <200000000>;
+	non-removable;
+	mmc-hs200-1_8v;
 	status = "okay";
 };
 
-/* SDHCI — eMMC (U-Boot mmc1) */
-&sdhci {
-	bus-width = <8>;
-	cap-mmc-highspeed;
-	cap-mmc-hs200;
-	cap-mmc-hs400;
-	mmc-hs200-1_8v;
-	mmc-hs400-1_8v;
+/* SD card — 150MHz max, card-detect GPIO0_A4 (factory values) */
+&sdmmc0 {
 	max-frequency = <150000000>;
-	non-removable;
-	pinctrl-0 = <&emmc_bus8 &emmc_clk &emmc_cmd &emmc_rstn_out>;
+	bus-width = <4>;
+	cap-mmc-highspeed;
+	cap-sd-highspeed;
+	disable-wp;
+	status = "okay";
+};
+
+/* TF slot — factory DTB has it enabled (now used for SDIO WiFi) */
+&sdmmc1 {
+	max-frequency = <150000000>;
+	status = "okay";
+};
+
+/* USB: OTG (fcc00000) + host (fd000000), single USB2 PHY (factory: both ok) */
+&usbdrd30 {
+	status = "okay";
+};
+
+&usbdrd_dwc3 {
+	dr_mode = "otg";
+	status = "okay";
+};
+
+&usbhost30 {
+	status = "okay";
+};
+
+&usb2phy0 {
+	status = "okay";
+};
+
+&u2phy0_otg {
+	status = "okay";
+};
+
+&u2phy0_host {
+	status = "okay";
+};
+
+/* PCIe3x2 — factory DTB: enabled, 2 lanes */
+&pcie3x2 {
+	num-lanes = <2>;
+	status = "okay";
+};
+
+/* Hardware crypto / RNG — factory DTB: enabled */
+&crypto {
+	status = "okay";
+};
+
+&rng {
 	status = "okay";
 };
 
@@ -285,71 +341,12 @@
 	status = "okay";
 };
 
-/* eFuse block for secure OTP */
-&secure_otp {
-	status = "okay";
-};
-
-/* USB2 PHY */
-&usb2_phy {
-	status = "okay";
-};
-
-/* USB host */
-&usbhost {
-	status = "okay";
-};
-
-/* PCIe (if populated) */
-&pcie {
-	status = "okay";
-};
-
-/* Watchdog */
-&watchdog {
-	status = "okay";
-};
-
-/* PWM (if used by panel backlight — GPIO unknown, placeholder) */
-&pwm0 {
-	status = "okay";
-};
-
-&pwm1 {
-	status = "okay";
-};
-
-/* I2C0 — may have PMIC on private bus (unrecovered) */
-&i2c0 {
-	status = "okay";
-};
-
-/* I2C1 — touch, sensors, etc. */
-&i2c1 {
-	status = "okay";
-};
-
-/* I2C2 — display-related (EDID, backlight) */
-&i2c2 {
-	status = "okay";
-};
-
-/* SPI — NOR flash */
-&spi0 {
-	status = "okay";
-};
-
-/* RTC */
-&rtc {
-	status = "okay";
-};
-
-/* Timer */
-&timer {
-	status = "okay";
-};
-
-/* Thermal zones */
-&thermal_zones {
+/* OTP-fuse helper block — verbatim from the factory DTB */
+secure_otp@fe3a0000 {
+	compatible = "rockchip,rk3568-secure-otp";
+	reg = <0x0 0xfe3a0000 0x0 0x4000>;
+	secure_conf = <0xfdd18008>;
+	mask_addr = <0xfe880000>;
+	cru_rst_addr = <0xfdd20470>;
 	status = "okay";
 };
