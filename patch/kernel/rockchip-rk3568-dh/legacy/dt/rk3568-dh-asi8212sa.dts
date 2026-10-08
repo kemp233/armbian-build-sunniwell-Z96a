@@ -56,20 +56,7 @@
 		#clock-cells = <0>;
 	};
 
-	/*
-	 * The board's PMIC is on a private I2C bus (no in-DT PMIC), so the
-	 * logic rail is described as a fixed always-on regulator: the
-	 * vendor rk356x.dtsi rkvdec node references vdd_logic.
-	 */
-	vdd_logic: regulator-vdd-logic {
-		compatible = "regulator-fixed";
-		regulator-name = "vdd_logic";
-		regulator-always-on;
-		regulator-boot-on;
-		regulator-min-microvolt = <900000>;
-		regulator-max-microvolt = <900000>;
-	};
-
+	/* 1.8V rail for SARADC (from factory DTB) */
 	vcca_1v8: regulator-vcca-1v8 {
 		compatible = "regulator-fixed";
 		regulator-name = "vcca_1v8";
@@ -94,13 +81,11 @@
 	 * (mode-normal=0x5242c300 ... mode-charge=0x5242c30b).
 	 */
 	reboot-mode {
-		compatible = "syscon-reboot-mode";
-		offset = <0x10>;
+		compatible = "rockchip,reboot-mode";
 		mode-normal = <0x5242c300>;
-		mode-loader = <0x5242c301>;
-		mode-fastboot = <0x5242c303>;
-		mode-recovery = <0x5242c303>;
-		mode-bootloader = <0x5242c309>;
+		mode-recovery = <0x5242c301>;
+		mode-bootloader = <0x5242c302>;
+		mode-loader = <0x5242c303>;
 		mode-charge = <0x5242c30b>;
 	};
 
@@ -137,7 +122,8 @@
 	};
 
 	/* Recovery/MASKROM key on SARADC ch0 (factory: press < 9uV) */
-	adc-keys {		compatible = "adc-keys";
+	adc-keys {
+		compatible = "adc-keys";
 		io-channels = <&saradc 0>;
 		io-channel-names = "buttons";
 		keyup-threshold-microvolt = <1800000>;
@@ -149,6 +135,15 @@
 			linux,code = <KEY_VOLUMEUP>;
 			press-threshold-microvolt = <9>;
 		};
+	};
+
+	/* ===== WiFi: AP6236 (BCM43438A0) on SDIO sdmmc1 ===== */
+	wireless_wlan: wireless-wlan {
+		compatible = "wlan-platdata";
+		rockchip,grf = <&grf>;
+		wifi_chip_type = "ap6236";
+		sdio_vref = <1800>;
+		status = "okay";
 	};
 };
 
@@ -218,19 +213,6 @@
 	};
 };
 
-wireless_wlan: wireless-wlan {
-	compatible = "wlan-platdata";
-	rockchip,grf = <&grf>;
-	wifi_chip_type = "ap6236";
-	sdio_vref = <1800>;
-	status = "okay";
-};
-
-&saradc {
-	vref-supply = <&vcca_1v8>;
-	status = "okay";
-};
-
 /*
  * GMAC0 — factory values: RGMII, clock_in_out=output, tx_delay=0x3c,
  * rx_delay=0x2f, PHY reset GPIO2_D3 active-low, PHY@0 on mdio0.
@@ -249,23 +231,15 @@ wireless_wlan: wireless-wlan {
 	status = "okay";
 };
 
-&mdio0 {
-	rgmii_phy0: ethernet-phy@0 {
-		compatible = "ethernet-phy-ieee802.3-c22";
-		reg = <0>;
-	};
-};
-
 /*
- * GMAC1 — factory values: RGMII M1 pins, tx_delay=0x4f, rx_delay=0x26,
- * PHY reset GPIO2_D1 active-low, PHY@0 on mdio1.
+ * GMAC1 (M1 pins) — factory values: RGMII, clock_in_out=output,
+ * tx_delay=0x4f, rx_delay=0x26, PHY reset GPIO2_D1 active-low, PHY@0 on mdio1.
  */
 &gmac1 {
 	phy-mode = "rgmii";
 	clock_in_out = "output";
 	assigned-clocks = <&cru SCLK_GMAC1_RX_TX>, <&cru SCLK_GMAC1>;
 	assigned-clock-parents = <&cru SCLK_GMAC1_RGMII_SPEED>, <&gmac1_clkin>;
-	pinctrl-names = "default";
 	pinctrl-0 = <&gmac1m1_miim
 		     &gmac1m1_tx_bus2
 		     &gmac1m1_rx_bus2
@@ -281,94 +255,101 @@ wireless_wlan: wireless-wlan {
 	status = "okay";
 };
 
-&mdio1 {
-	rgmii_phy1: ethernet-phy@0 {
-		compatible = "ethernet-phy-ieee802.3-c22";
-		reg = <0>;
-	};
+/* SDMMC0 — SD card (U-Boot mmc0) */
+&sdmmc0 {
+	bus-width = <4>;
+	cap-sd-highspeed;
+	cap-mmc-highspeed;
+	max-frequency = <150000000>;
+	pinctrl-0 = <&sdmmc0_clk &sdmmc0_cmd &sdmmc0_bus4>;
+	status = "okay";
 };
 
-/* eMMC — HS200 8-bit, 200MHz max (factory values) */
+/* SDHCI — eMMC (U-Boot mmc1) */
 &sdhci {
 	bus-width = <8>;
-	max-frequency = <200000000>;
-	non-removable;
-	mmc-hs200-1_8v;
-	status = "okay";
-};
-
-/* SD card — 150MHz max, card-detect GPIO0_A4 (factory values) */
-&sdmmc0 {
-	max-frequency = <150000000>;
-	bus-width = <4>;
 	cap-mmc-highspeed;
-	cap-sd-highspeed;
-	disable-wp;
-	status = "okay";
-};
-
-/* TF slot — factory DTB has it enabled */
-&sdmmc1 {
+	cap-mmc-hs200;
+	cap-mmc-hs400;
+	mmc-hs200-1_8v;
+	mmc-hs400-1_8v;
 	max-frequency = <150000000>;
+	non-removable;
+	pinctrl-0 = <&emmc_bus8 &emmc_clk &emmc_cmd &emmc_rstn_out>;
 	status = "okay";
 };
 
-/* USB: OTG (fcc00000) + host (fd000000), single USB2 PHY (factory: both ok) */
-&usbdrd30 {
+/* SARADC vref */
+&saradc {
+	vref-supply = <&vcca_1v8>;
 	status = "okay";
 };
 
-&usbdrd_dwc3 {
-	dr_mode = "otg";
+/* eFuse block for secure OTP */
+&secure_otp {
 	status = "okay";
 };
 
-&usbhost30 {
+/* USB2 PHY */
+&usb2_phy {
 	status = "okay";
 };
 
-&usb2phy0 {
+/* USB host */
+&usbhost {
 	status = "okay";
 };
 
-&u2phy0_otg {
+/* PCIe (if populated) */
+&pcie {
 	status = "okay";
 };
 
-&u2phy0_host {
+/* Watchdog */
+&watchdog {
 	status = "okay";
 };
 
-/* PCIe3x2 — factory DTB: enabled, 2 lanes */
-&pcie3x2 {
-	num-lanes = <2>;
+/* PWM (if used by panel backlight — GPIO unknown, placeholder) */
+&pwm0 {
 	status = "okay";
 };
 
-/* Hardware crypto / RNG — factory DTB: enabled */
-&crypto {
+&pwm1 {
 	status = "okay";
 };
 
-&rng {
+/* I2C0 — may have PMIC on private bus (unrecovered) */
+&i2c0 {
 	status = "okay";
 };
 
-/*
- * OTP-fuse helper block — verbatim from the factory DTB:
- *   secure_conf  = 0xfdd18008 (PMU secure GRF + 0x8)
- *   mask_addr    = 0xfe880000 (efuse controller)
- *   cru_rst_addr = 0xfdd20470 (CRU + 0x470)
- * No mainline driver binds "rockchip,rk3568-secure-otp"; the node is kept
- * for fidelity and for future fuse-reading work.
- */
-/ {
-	secure_otp@fe3a0000 {
-		compatible = "rockchip,rk3568-secure-otp";
-		reg = <0x0 0xfe3a0000 0x0 0x4000>;
-		secure_conf = <0xfdd18008>;
-		mask_addr = <0xfe880000>;
-		cru_rst_addr = <0xfdd20470>;
-		status = "okay";
-	};
+/* I2C1 — touch, sensors, etc. */
+&i2c1 {
+	status = "okay";
+};
+
+/* I2C2 — display-related (EDID, backlight) */
+&i2c2 {
+	status = "okay";
+};
+
+/* SPI — NOR flash */
+&spi0 {
+	status = "okay";
+};
+
+/* RTC */
+&rtc {
+	status = "okay";
+};
+
+/* Timer */
+&timer {
+	status = "okay";
+};
+
+/* Thermal zones */
+&thermal_zones {
+	status = "okay";
 };
