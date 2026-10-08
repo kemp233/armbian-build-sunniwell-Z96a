@@ -76,6 +76,16 @@
 		regulator-max-microvolt = <3300000>;
 	};
 
+	/* vdd_logic — required by rk356x.dtsi rkvdec node (vdec-supply) */
+	vdd_logic: regulator-vdd-logic {
+		compatible = "regulator-fixed";
+		regulator-name = "vdd_logic";
+		regulator-always-on;
+		regulator-boot-on;
+		regulator-min-microvolt = <900000>;
+		regulator-max-microvolt = <900000>;
+	};
+
 	/*
 	 * Dahua reboot-mode magics — verbatim from the factory dtbo fragment
 	 * (mode-normal=0x5242c300 ... mode-charge=0x5242c30b).
