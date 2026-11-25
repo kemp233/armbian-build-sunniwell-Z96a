@@ -59,9 +59,15 @@ jobs:
             TEE="$PWD/packages/blobs/rockchip/rk3576/tee.bin" \
             BL31="$PWD/packages/blobs/rockchip/rk3576/bl31.elf" \
             olddefconfig < /dev/null
-          grep -q 'Armbian edits .config after the defconfig target' \
-            config/sources/families/rockchip-rk3576.conf
-          grep -q 'make olddefconfig' config/sources/families/rockchip-rk3576.conf
+          make -C /tmp/rk3576-uboot-config ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            TEE="$PWD/packages/blobs/rockchip/rk3576/tee.bin" \
+            BL31="$PWD/packages/blobs/rockchip/rk3576/bl31.elf" \
+            syncconfig < /dev/null
+          test -s /tmp/rk3576-uboot-config/include/config/auto.conf
+          test /tmp/rk3576-uboot-config/include/config/auto.conf \
+            -nt /tmp/rk3576-uboot-config/.config
+          grep -q 'make syncconfig' config/sources/families/rockchip-rk3576.conf
       - name: Build Armbian
         run: |
           TARGET="${{ inputs.target }}"
