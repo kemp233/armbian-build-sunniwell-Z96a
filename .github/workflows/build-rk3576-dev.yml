@@ -30,7 +30,7 @@ jobs:
           haskell: true
           large-packages: true
           docker-images: true
-          swap: false
+          swap-storage: false
       - name: Verify board inputs
         run: |
           set -euo pipefail
@@ -47,7 +47,9 @@ jobs:
           git ls-remote https://github.com/kemp233/linux-rockchip.git refs/heads/rk-6.1-rkr7.2-sync-20261125
       - name: Build Armbian
         run: |
-          ./compile.sh "${{ inputs.target }}" \
+          TARGET="${{ inputs.target }}"
+          if [ "$TARGET" = image ]; then TARGET=build; fi
+          ./compile.sh "$TARGET" \
             BOARD=rk3576-dev BRANCH=legacy RELEASE=${{ inputs.release }} \
             BUILD_DESKTOP=no BUILD_MINIMAL=yes KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha,xz CLEAN_LEVEL=make,debs \
