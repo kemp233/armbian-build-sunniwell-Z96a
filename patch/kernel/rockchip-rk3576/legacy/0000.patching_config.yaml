@@ -1,0 +1,9 @@
+config:
+  name: rk3576-6.1-dev
+  kind: kernel
+  type: vendor
+  branch: rk-6.1-rkr7.2-sync-20261125
+  dts-directories:
+    - { source: "dt", target: "arch/arm64/boot/dts/rockchip" }
+  auto-patch-dt-makefile:
+    - { incremental: true, directory: "arch/arm64/boot/dts/rockchip", config-var: "CONFIG_ARCH_ROCKCHIP" }

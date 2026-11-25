@@ -1,0 +1,81 @@
+name: Build RK3576 development target
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        options: [image, kernel, uboot]
+        default: image
+      release:
+        description: Debian release
+        type: choice
+        options: [bookworm]
+        default: bookworm
+permissions:
+  contents: read
+jobs:
+  build:
+    name: RK3576 U-Boot kernel DTB initramfs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap: false
+      - name: Verify board inputs
+        run: |
+          set -euo pipefail
+          bash -n config/boards/rk3576-dev.conf
+          bash -n config/sources/families/rockchip-rk3576.conf
+          test -s patch/kernel/rockchip-rk3576/legacy/dt/rk3576-dev.dts
+          test -s config/kernel/linux-rockchip-rk3576-legacy.config
+          for blob in bl31.elf tee.bin vendor-idblock-copy.bin; do
+            test -s "packages/blobs/rockchip/rk3576/$blob"
+          done
+          grep -q 'rk-6.1-rkr7.2-sync-20261125' config/sources/families/rockchip-rk3576.conf
+          grep -q 'rk3576-dev-20261125' config/sources/families/rockchip-rk3576.conf
+          git ls-remote https://github.com/kemp233/u-boot-1.git refs/heads/rk3576-dev-20261125
+          git ls-remote https://github.com/kemp233/linux-rockchip.git refs/heads/rk-6.1-rkr7.2-sync-20261125
+      - name: Build Armbian
+        run: |
+          ./compile.sh "${{ inputs.target }}" \
+            BOARD=rk3576-dev BRANCH=legacy RELEASE=${{ inputs.release }} \
+            BUILD_DESKTOP=no BUILD_MINIMAL=yes KERNEL_CONFIGURE=no \
+            COMPRESS_OUTPUTIMAGE=sha,xz CLEAN_LEVEL=make,debs \
+            EXTERNAL=yes EXTERNAL_NEW=pre-built INSTALL_HEADERS=no \
+            ENABLE_EXTENSIONS='' EXPERT=yes
+      - name: Verify and collect artifacts
+        if: success()
+        run: |
+          set -euo pipefail
+          mkdir -p output/rk3576-dev
+          cp -a output/debs output/rk3576-dev/ || true
+          if [ -d output/images ]; then
+            find output/images -maxdepth 1 -type f -name '*.img' -delete
+            cp -a output/images/. output/rk3576-dev/
+          fi
+          find output/rk3576-dev -maxdepth 2 -type f -printf '%P %s bytes\n' | sort
+          find output -type f \( -name 'u-boot.itb' -o -name 'u-boot.bin' \) -print
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: rk3576-dev-${{ inputs.target }}-${{ github.run_number }}
+          path: output/rk3576-dev
+          retention-days: 14
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rk3576-dev-logs-${{ github.run_number }}
+          path: output/debug
+          retention-days: 14
+          if-no-files-found: warn
