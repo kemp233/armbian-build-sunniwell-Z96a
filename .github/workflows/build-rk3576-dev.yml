@@ -45,6 +45,17 @@ jobs:
           grep -q 'rk3576-dev-20261125' config/sources/families/rockchip-rk3576.conf
           git ls-remote https://github.com/kemp233/u-boot-1.git refs/heads/rk3576-dev-20261125
           git ls-remote https://github.com/kemp233/linux-rockchip.git refs/heads/rk-6.1-rkr7.2-sync-20261125
+      - name: Verify U-Boot config is non-interactive
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu flex bison bc
+          git clone --depth 1 --branch rk3576-dev-20261125 \
+            https://github.com/kemp233/u-boot-1.git /tmp/rk3576-uboot-config
+          make -C /tmp/rk3576-uboot-config ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- rk3576-dev_defconfig
+          make -C /tmp/rk3576-uboot-config ARCH=arm64 \
+            CROSS_COMPILE=aarch64-linux-gnu- olddefconfig < /dev/null
       - name: Build Armbian
         run: |
           TARGET="${{ inputs.target }}"
