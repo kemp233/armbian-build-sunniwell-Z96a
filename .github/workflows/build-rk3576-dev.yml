@@ -67,7 +67,8 @@ jobs:
           test -s /tmp/rk3576-uboot-config/include/config/auto.conf
           test /tmp/rk3576-uboot-config/include/config/auto.conf \
             -nt /tmp/rk3576-uboot-config/.config
-          grep -q 'make syncconfig' config/sources/families/rockchip-rk3576.conf
+          grep -q '"TEE=${RKBIN_DIR}/${TEE_BLOB}"' config/sources/families/rockchip-rk3576.conf
+          ! grep -q 'may-sync-config=0' config/sources/families/rockchip-rk3576.conf
       - name: Build Armbian
         run: |
           TARGET="${{ inputs.target }}"
