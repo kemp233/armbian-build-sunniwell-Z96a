@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: (GPL-2.0+ OR MIT)
-/* RK3576 development target: serial, eMMC, SD, SDIO WiFi (AP6275P) and SD. */
+/* RK3576 development target: serial, eMMC, SD and SDIO WiFi (AP6275P). */
 /dts-v1/;
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/pinctrl/rockchip.h>
@@ -18,14 +18,13 @@
 		stdout-path = "serial0:1500000n8";
 	};
 
-	wireless_wlan: wireless-wlan {
-		compatible = "wlan-platdata";
-		wifi_chip_type = "ap6275p";
+	/* Mainline-standard WiFi power sequencing (wlan-platdata is not in this kernel). */
+	sdio_pwrseq: sdio-pwrseq {
+		compatible = "mmc-pwrseq-simple";
 		pinctrl-names = "default";
-		pinctrl-0 = <&wifi_host_wake_irq>;
-		WIFI,host_wake_irq = <&gpio0 RK_PB0 GPIO_ACTIVE_HIGH>;
-		WIFI,poweren_gpio = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>;
-		status = "okay";
+		pinctrl-0 = <&wifi_poweren_gpio>;
+		post-power-on-delay-ms = <200>;
+		reset-gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_LOW>;
 	};
 };
 
@@ -52,10 +51,17 @@
 
 &sdio {
 	max-frequency = <200000000>;
+	bus-width = <4>;
+	no-sd;
+	no-mmc;
+	disable-wp;
 	cap-sd-highspeed;
 	cap-sdio-irq;
 	keep-power-in-suspend;
 	non-removable;
+	mmc-pwrseq = <&sdio_pwrseq>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&sdmmc1m0_bus4 &sdmmc1m0_clk &sdmmc1m0_cmd>;
 	status = "okay";
 };
 
@@ -65,12 +71,8 @@
 
 &pinctrl {
 	wireless-wlan {
-		wifi_host_wake_irq: wifi-host-wake-irq {
-			rockchip,pins = <0 RK_PB0 RK_FUNC_GPIO &pcfg_pull_down>;
-		};
-
 		wifi_poweren_gpio: wifi-poweren-gpio {
-			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_up>;
+			rockchip,pins = <1 RK_PC6 RK_FUNC_GPIO &pcfg_pull_none>;
 		};
 	};
 };
