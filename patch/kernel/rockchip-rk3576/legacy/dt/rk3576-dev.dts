@@ -69,6 +69,16 @@
 	status = "okay";
 };
 
+/* RK3576 GPU (Mali-G310 Bifrost) and NPU (RKNN) — enabled without PMIC
+ * supply nodes; the board uses fixed rails. */
+&gpu {
+	status = "okay";
+};
+
+&rknpu {
+	status = "okay";
+};
+
 &pinctrl {
 	wireless-wlan {
 		wifi_poweren_gpio: wifi-poweren-gpio {
