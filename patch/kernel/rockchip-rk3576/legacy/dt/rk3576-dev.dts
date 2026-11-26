@@ -72,6 +72,8 @@
 /* RK3576 GPU (Mali-G310 Bifrost) and NPU (RKNN) — enabled without PMIC
  * supply nodes; the board uses fixed rails. */
 &gpu {
+	/* Vendor Mali kbase uses this to defer power-off after last job. */
+	power-off-delay-ms = <100>;
 	status = "okay";
 };
 
