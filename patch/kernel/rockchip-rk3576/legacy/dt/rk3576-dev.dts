@@ -81,6 +81,12 @@
 	status = "okay";
 };
 
+/* RKNN runtime 1.3.0 switches IOMMU domains; enable the NPU MMU so the
+ * driver runs in iommu mode (otherwise jobs time out on domain switch). */
+&rknpu_mmu {
+	status = "okay";
+};
+
 &pinctrl {
 	wireless-wlan {
 		wifi_poweren_gpio: wifi-poweren-gpio {
