@@ -1,0 +1,204 @@
+diff --git a/drivers/rknpu/include/rknpu_drv.h b/drivers/rknpu/include/rknpu_drv.h
+index 3f3804ad7b6a..f561e0c8ff2e 100644
+--- a/drivers/rknpu/include/rknpu_drv.h
++++ b/drivers/rknpu/include/rknpu_drv.h
+@@ -112,11 +112,11 @@ struct rknpu_subcore_data {
+ struct rknpu_device {
+ 	void __iomem *base[RKNPU_MAX_CORES];
+ 	struct device *dev;
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	struct device *fake_dev;
+ 	struct drm_device *drm_dev;
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 	struct miscdevice miscdev;
+ 	struct rk_dma_heap *heap;
+ #endif
+diff --git a/drivers/rknpu/include/rknpu_job.h b/drivers/rknpu/include/rknpu_job.h
+index b4d40d96ffce..166ba4592a4e 100644
+--- a/drivers/rknpu/include/rknpu_job.h
++++ b/drivers/rknpu/include/rknpu_job.h
+@@ -55,11 +55,11 @@ irqreturn_t rknpu_core0_irq_handler(int irq, void *data);
+ irqreturn_t rknpu_core1_irq_handler(int irq, void *data);
+ irqreturn_t rknpu_core2_irq_handler(int irq, void *data);
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
+ 		       struct drm_file *file_priv);
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data);
+ #endif
+ 
+diff --git a/drivers/rknpu/rknpu_drv.c b/drivers/rknpu/rknpu_drv.c
+index 32886f172960..ea0ef545fc99 100644
+--- a/drivers/rknpu/rknpu_drv.c
++++ b/drivers/rknpu/rknpu_drv.c
+@@ -45,7 +45,7 @@
+ #include "rknpu_devfreq.h"
+ #include "rknpu_iommu.h"
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ #include <drm/drm_device.h>
+ #include <drm/drm_ioctl.h>
+ #include <drm/drm_file.h>
+@@ -53,7 +53,7 @@
+ #include "rknpu_gem.h"
+ #endif
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ #include <linux/rk-dma-heap.h>
+ #include "rknpu_mem.h"
+ #endif
+@@ -525,7 +525,7 @@ static int rknpu_action(struct rknpu_device *rknpu_dev,
+ 	return ret;
+ }
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ static int rknpu_open(struct inode *inode, struct file *file)
+ {
+ 	struct rknpu_device *rknpu_dev =
+@@ -665,7 +665,7 @@ const struct file_operations rknpu_fops = {
+ };
+ #endif
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ #if KERNEL_VERSION(6, 1, 0) > LINUX_VERSION_CODE
+ static const struct vm_operations_struct rknpu_gem_vm_ops = {
+ 	.fault = rknpu_gem_fault,
+@@ -851,7 +851,7 @@ static bool rknpu_is_iommu_enable(struct device *dev)
+ 	return true;
+ }
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ static int drm_fake_dev_register(struct rknpu_device *rknpu_dev)
+ {
+ 	const struct platform_device_info rknpu_dev_info = {
+@@ -1432,14 +1432,14 @@ static int rknpu_probe(struct platform_device *pdev)
+ 		LOG_DEV_WARN(dev, "bypass irq handler!\n");
+ 	}
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	ret = rknpu_drm_probe(rknpu_dev);
+ 	if (ret) {
+ 		LOG_DEV_ERROR(dev, "failed to probe device for rknpu\n");
+ 		return ret;
+ 	}
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 	rknpu_dev->miscdev.minor = MISC_DYNAMIC_MINOR;
+ 	rknpu_dev->miscdev.name = "rknpu";
+ 	rknpu_dev->miscdev.fops = &rknpu_fops;
+@@ -1552,10 +1552,10 @@ static int rknpu_probe(struct platform_device *pdev)
+ #endif
+ 
+ err_remove_drv:
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	rknpu_drm_remove(rknpu_dev);
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 	misc_deregister(&(rknpu_dev->miscdev));
+ #endif
+ 
+@@ -1596,10 +1596,10 @@ static int rknpu_remove(struct platform_device *pdev)
+ 		iommu_group_put(rknpu_dev->iommu_group);
+ 	}
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	rknpu_drm_remove(rknpu_dev);
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 	misc_deregister(&(rknpu_dev->miscdev));
+ #endif
+ 
+diff --git a/drivers/rknpu/rknpu_job.c b/drivers/rknpu/rknpu_job.c
+index 57d67d81f7d5..f053fb847990 100644
+--- a/drivers/rknpu/rknpu_job.c
++++ b/drivers/rknpu/rknpu_job.c
+@@ -92,7 +92,7 @@ static int rknpu_get_task_number(struct rknpu_job *job, int core_index)
+ 
+ static void rknpu_job_free(struct rknpu_job *job)
+ {
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	struct rknpu_gem_object *task_obj = NULL;
+ 
+ 	task_obj =
+@@ -130,7 +130,7 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
+ {
+ 	struct rknpu_job *job = NULL;
+ 	int i = 0;
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	struct rknpu_gem_object *task_obj = NULL;
+ #endif
+ 
+@@ -148,7 +148,7 @@ static inline struct rknpu_job *rknpu_job_alloc(struct rknpu_device *rknpu_dev,
+ 	job->iommu_domain_id = args->iommu_domain_id;
+ 	for (i = 0; i < rknpu_dev->config->num_irqs; i++)
+ 		atomic_set(&job->submit_count[i], 0);
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	task_obj = (struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
+ 	if (task_obj)
+ 		rknpu_gem_object_get(&task_obj->base);
+@@ -274,11 +274,11 @@ static inline int rknpu_job_subcore_commit_pc(struct rknpu_job *job,
+ {
+ 	struct rknpu_device *rknpu_dev = job->rknpu_dev;
+ 	struct rknpu_submit *args = job->args;
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ 	struct rknpu_gem_object *task_obj =
+ 		(struct rknpu_gem_object *)(uintptr_t)args->task_obj_addr;
+ #endif
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 	struct rknpu_mem_object *task_obj =
+ 		(struct rknpu_mem_object *)(uintptr_t)args->task_obj_addr;
+ #endif
+@@ -845,7 +845,7 @@ static int rknpu_submit(struct rknpu_device *rknpu_dev,
+ 	return ret;
+ }
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DRM_GEM
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
+ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
+ 		       struct drm_file *file_priv)
+ {
+@@ -856,7 +856,7 @@ int rknpu_submit_ioctl(struct drm_device *dev, void *data,
+ }
+ #endif
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ int rknpu_submit_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
+ {
+ 	struct rknpu_submit args;
+diff --git a/drivers/rknpu/rknpu_mem.c b/drivers/rknpu/rknpu_mem.c
+index e096a717f503..fc03b08aa31e 100644
+--- a/drivers/rknpu/rknpu_mem.c
++++ b/drivers/rknpu/rknpu_mem.c
+@@ -15,7 +15,7 @@
+ #include "rknpu_ioctl.h"
+ #include "rknpu_mem.h"
+ 
+-#ifdef CONFIG_ROCKCHIP_RKNPU_DMA_HEAP
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 
+ #if KERNEL_VERSION(6, 1, 115) < LINUX_VERSION_CODE
+ #ifdef CONFIG_ARM64

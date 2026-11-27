@@ -79,6 +79,66 @@ jobs:
             COMPRESS_OUTPUTIMAGE=sha,xz CLEAN_LEVEL=make,debs \
             EXTERNAL=yes EXTERNAL_NEW=pre-built INSTALL_HEADERS=no \
             ENABLE_EXTENSIONS='' EXPERT=yes
+      - name: Build dual RKNPU memory-manager modules
+        if: success()
+        run: |
+          set -euo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu bc bison flex libssl-dev libelf-dev dwarves
+          git clone --depth 1 --branch rk-6.1-rkr7.2-sync-20261125 \
+            https://github.com/kemp233/linux-rockchip.git /tmp/linux-rknpu
+          cd /tmp/linux-rknpu
+          for p in "$GITHUB_WORKSPACE"/patch/kernel/rockchip-rk3576/legacy/*.patch; do
+            git apply --check "$p"
+            git apply "$p"
+          done
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          cp "$GITHUB_WORKSPACE/config/kernel/linux-rockchip-rk3576-legacy.config" .config
+          make olddefconfig
+          mkdir -p "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu"
+          build_variant() {
+            local mode="$1" out="$2"
+            python3 - "$mode" << 'PY'
+          import re, sys
+          mode = sys.argv[1]
+          p = '.config'
+          s = open(p).read()
+          for k in ('ROCKCHIP_RKNPU_DRM_GEM', 'ROCKCHIP_RKNPU_DMA_HEAP'):
+              s = re.sub(r'^CONFIG_%s=.*\n' % k, '', s, flags=re.M)
+              s = re.sub(r'^# CONFIG_%s is not set\n' % k, '', s, flags=re.M)
+          if mode == 'gem':
+              s += 'CONFIG_ROCKCHIP_RKNPU_DRM_GEM=m\n# CONFIG_ROCKCHIP_RKNPU_DMA_HEAP is not set\n'
+          else:
+              s += '# CONFIG_ROCKCHIP_RKNPU_DRM_GEM is not set\nCONFIG_ROCKCHIP_RKNPU_DMA_HEAP=m\n'
+          open(p, 'w').write(s)
+          PY
+            make olddefconfig
+            make -j"$(nproc)" M=drivers/rknpu clean
+            make -j"$(nproc)" modules_prepare
+            make -j"$(nproc)" M=drivers/rknpu modules
+            cp drivers/rknpu/rknpu.ko "$out"
+          }
+          build_variant gem  "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
+          build_variant heap "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko"
+          cp "$GITHUB_WORKSPACE/scripts/rk3576/npu-mode-switch.sh" \
+             "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/npu-mode"
+          cp "$GITHUB_WORKSPACE/scripts/rk3576/npu-mode-load.sh" \
+             "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/npu-mode-load"
+          cp "$GITHUB_WORKSPACE/scripts/rk3576/install-npu-mode.sh" \
+             "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/install-npu-mode.sh"
+          cp "$GITHUB_WORKSPACE/scripts/rk3576/npu-mode.service" \
+             "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/npu-mode.service"
+          chmod +x "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/npu-mode" \
+                   "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/npu-mode-load" \
+                   "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/install-npu-mode.sh"
+          # The two variants must be genuinely different modules.
+          ! cmp -s "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko" \
+                   "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko"
+          modinfo -F description "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
+          modinfo -F description "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko"
+          modinfo -F vermagic "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
       - name: Verify and collect artifacts
         if: success()
         run: |

@@ -1,0 +1,18 @@
+diff --git a/drivers/rknpu/rknpu_drv.c b/drivers/rknpu/rknpu_drv.c
+index 32886f172960..1a9dc10593f5 100644
+--- a/drivers/rknpu/rknpu_drv.c
++++ b/drivers/rknpu/rknpu_drv.c
+@@ -1689,7 +1689,13 @@ static void rknpu_exit(void)
+ late_initcall(rknpu_init);
+ module_exit(rknpu_exit);
+ 
++#if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
++MODULE_DESCRIPTION("RKNPU driver (DMA heap memory manager)");
++#elif IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DRM_GEM)
++MODULE_DESCRIPTION("RKNPU driver (DRM GEM memory manager)");
++#else
+ MODULE_DESCRIPTION("RKNPU driver");
++#endif
+ MODULE_AUTHOR("Felix Zeng <felix.zeng@rock-chips.com>");
+ MODULE_ALIAS("rockchip-rknpu");
+ MODULE_LICENSE("GPL v2");

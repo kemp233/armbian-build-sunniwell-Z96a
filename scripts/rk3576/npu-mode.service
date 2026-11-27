@@ -1,0 +1,17 @@
+[Unit]
+Description=RK3576 RKNPU memory-manager module loader
+# Load the RKNPU driver in the mode recorded in /etc/npu_mode.
+# The file contains "drm" or "heap"; missing file means "heap" (the mode the
+# Rockchip BSP defaults to and the one verified working on this board).
+After=systemd-modules-load.service
+Before=rkvoice.service
+ConditionPathExists=/opt/rknpu
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/rknpu/npu-mode-load
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target

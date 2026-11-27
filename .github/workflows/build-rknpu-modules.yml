@@ -1,0 +1,195 @@
+name: Build RK3576 dual RKNPU memory-manager modules
+
+# Builds two interchangeable rknpu.ko modules for RK3576:
+#   rknpu_drm.ko  -> CONFIG_ROCKCHIP_RKNPU_DRM_GEM   (NPU memory via DRM GEM)
+#   rknpu_heap.ko -> CONFIG_ROCKCHIP_RKNPU_DMA_HEAP  (NPU memory via dma-buf heap)
+#
+# The kernel image itself is built with CONFIG_ROCKCHIP_RKNPU=m and both memory
+# managers disabled, so exactly one module can be loaded at runtime and the
+# active mode is switched with insmod/rmmod (seconds, no reboot).
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        type: choice
+        options: [image, kernel, uboot]
+        default: image
+
+permissions:
+  contents: read
+
+jobs:
+  rknpu-modules:
+    name: rknpu_drm.ko + rknpu_heap.ko
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: false
+
+      - name: Install toolchain
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            gcc-aarch64-linux-gnu gcc-12-cross \
+            libssl-dev bc bison flex libelf-dev dwarves
+
+      - name: Fetch kernel source
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch rk-6.1-rkr7.2-sync-20261125 \
+            https://github.com/kemp233/linux-rockchip.git /tmp/linux-rknpu
+          cd /tmp/linux-rknpu
+          git log --oneline -1
+
+      - name: Apply RKNPU patches
+        run: |
+          set -euo pipefail
+          cd /tmp/linux-rknpu
+          for p in "$GITHUB_WORKSPACE"/patch/kernel/rockchip-rk3576/legacy/*.patch; do
+            git apply --check "$p"
+            git apply "$p"
+            echo "applied $(basename "$p")"
+          done
+          # Both memory managers must be tristate for modular builds.
+          grep -nE 'config ROCKCHIP_RKNPU_(DRM_GEM|DMA_HEAP)' -A1 drivers/rknpu/Kconfig
+          grep -n 'MODULE_DESCRIPTION' drivers/rknpu/rknpu_drv.c
+
+      - name: Configure kernel for module build
+        run: |
+          set -euo pipefail
+          cd /tmp/linux-rknpu
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          # Start from the board's shipped kernel config so the module matches
+          # the running kernel exactly (same vermagic, same structs).
+          cp "$GITHUB_WORKSPACE/config/kernel/linux-rockchip-rk3576-legacy.config" .config
+          make olddefconfig
+          # Both memory managers are tristate, so they can be selected as
+          # modules. The RKNPU driver itself stays modular.
+          grep -q '^CONFIG_ROCKCHIP_RKNPU=m$' .config
+          grep -q '^CONFIG_DRM=y$' .config
+          grep -q '^CONFIG_DMABUF_HEAPS_ROCKCHIP_CMA_HEAP=y$' .config
+          # Neither memory manager is selected in the base config; each build
+          # below writes the one it needs.
+          python3 - << 'PY'
+          import re
+          p = '.config'
+          s = open(p).read()
+          for k in ('ROCKCHIP_RKNPU_DRM_GEM', 'ROCKCHIP_RKNPU_DMA_HEAP'):
+              s = re.sub(r'^CONFIG_%s=.*\n' % k, '', s, flags=re.M)
+              s = re.sub(r'^# CONFIG_%s is not set\n' % k, '', s, flags=re.M)
+          s += ('CONFIG_ROCKCHIP_RKNPU_DRM_GEM=m\n'
+                '# CONFIG_ROCKCHIP_RKNPU_DMA_HEAP is not set\n')
+          open(p, 'w').write(s)
+          PY
+          make olddefconfig
+          grep -E '^CONFIG_ROCKCHIP_RKNPU' .config
+
+      - name: Build rknpu_drm.ko (DRM GEM memory manager)
+        run: |
+          set -euo pipefail
+          cd /tmp/linux-rknpu
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          python3 - << 'PY'
+          import re
+          p = '.config'
+          s = open(p).read()
+          for k in ('ROCKCHIP_RKNPU_DRM_GEM', 'ROCKCHIP_RKNPU_DMA_HEAP'):
+              s = re.sub(r'^CONFIG_%s=.*\n' % k, '', s, flags=re.M)
+              s = re.sub(r'^# CONFIG_%s is not set\n' % k, '', s, flags=re.M)
+          s += ('CONFIG_ROCKCHIP_RKNPU_DRM_GEM=m\n'
+                '# CONFIG_ROCKCHIP_RKNPU_DMA_HEAP is not set\n')
+          open(p, 'w').write(s)
+          PY
+          make olddefconfig
+          grep -E '^CONFIG_ROCKCHIP_RKNPU' .config
+          grep -q '^CONFIG_ROCKCHIP_RKNPU_DRM_GEM=m$' .config
+          # The choice member must be a module so that only the memory-manager
+          # object differs between the two builds.
+          grep -q 'CONFIG_ROCKCHIP_RKNPU_DRM_GEM_MODULE 1' include/generated/autoconf.h
+          make -j"$(nproc)" M=drivers/rknpu clean
+          make -j"$(nproc)" modules_prepare
+          make -j"$(nproc)" M=drivers/rknpu modules
+          mkdir -p /tmp/rknpu-out
+          cp drivers/rknpu/rknpu.ko /tmp/rknpu-out/rknpu_drm.ko
+          modinfo /tmp/rknpu-out/rknpu_drm.ko | tee /tmp/rknpu-out/rknpu_drm.modinfo
+          # The DRM variant must not contain the dma-buf heap memory manager.
+          ! nm /tmp/rknpu-out/rknpu_drm.ko | grep -q 'U misc_register'
+
+      - name: Build rknpu_heap.ko (DMA heap memory manager)
+        run: |
+          set -euo pipefail
+          cd /tmp/linux-rknpu
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          python3 - << 'PY'
+          import re
+          p = '.config'
+          s = open(p).read()
+          for k in ('ROCKCHIP_RKNPU_DRM_GEM', 'ROCKCHIP_RKNPU_DMA_HEAP'):
+              s = re.sub(r'^CONFIG_%s=.*\n' % k, '', s, flags=re.M)
+              s = re.sub(r'^# CONFIG_%s is not set\n' % k, '', s, flags=re.M)
+          s += ('# CONFIG_ROCKCHIP_RKNPU_DRM_GEM is not set\n'
+                'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP=m\n')
+          open(p, 'w').write(s)
+          PY
+          make olddefconfig
+          grep -E '^CONFIG_ROCKCHIP_RKNPU' .config
+          grep -q '^CONFIG_ROCKCHIP_RKNPU_DMA_HEAP=m$' .config
+          grep -q 'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP_MODULE 1' include/generated/autoconf.h
+          # Rebuild the driver objects so the heap variant replaces the gem one.
+          make -j"$(nproc)" M=drivers/rknpu clean
+          make -j"$(nproc)" modules_prepare
+          make -j"$(nproc)" M=drivers/rknpu modules
+          mkdir -p /tmp/rknpu-out
+          cp drivers/rknpu/rknpu.ko /tmp/rknpu-out/rknpu_heap.ko
+          modinfo /tmp/rknpu-out/rknpu_heap.ko | tee /tmp/rknpu-out/rknpu_heap.modinfo
+          # The heap variant must not contain the DRM GEM memory manager.
+          ! nm /tmp/rknpu-out/rknpu_heap.ko | grep -q 'U drm_dev_register'
+
+      - name: Verify modules and add switch script
+        run: |
+          set -euo pipefail
+          cd /tmp/rknpu-out
+          test -s rknpu_drm.ko
+          test -s rknpu_heap.ko
+          # The two modules must NOT be byte-identical.
+          if cmp -s rknpu_drm.ko rknpu_heap.ko; then
+            echo "::error::rknpu_drm.ko and rknpu_heap.ko are identical - variants did not differ"
+            exit 1
+          fi
+          sha256sum rknpu_drm.ko rknpu_heap.ko | tee SHA256SUMS
+          cp "$GITHUB_WORKSPACE/scripts/rk3576/npu-mode-switch.sh" ./npu-mode-switch.sh
+          chmod +x ./npu-mode-switch.sh
+          ls -la
+
+      - name: Upload modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: rknpu-modules-${{ github.run_number }}
+          path: /tmp/rknpu-out
+          retention-days: 30
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rknpu-modules-logs-${{ github.run_number }}
+          path: /tmp/linux-rknpu
+          retention-days: 7
+          if-no-files-found: warn

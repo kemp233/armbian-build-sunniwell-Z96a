@@ -1,0 +1,20 @@
+diff --git a/drivers/rknpu/Kconfig b/drivers/rknpu/Kconfig
+index c3343eece9c6..b114a39bedaa 100644
+--- a/drivers/rknpu/Kconfig
++++ b/drivers/rknpu/Kconfig
+@@ -42,13 +42,13 @@ choice
+ 	  Select RKNPU memory manager
+ 
+ config ROCKCHIP_RKNPU_DRM_GEM
+-	bool "RKNPU DRM GEM"
++	tristate "RKNPU DRM GEM"
+ 	depends on DRM
+ 	help
+ 	  Enable RKNPU memory manager by DRM GEM.
+ 
+ config ROCKCHIP_RKNPU_DMA_HEAP
+-	bool "RKNPU DMA heap"
++	tristate "RKNPU DMA heap"
+ 	depends on DMABUF_HEAPS_ROCKCHIP_CMA_HEAP
+ 	help
+ 	  Enable RKNPU memory manager by DMA Heap.
