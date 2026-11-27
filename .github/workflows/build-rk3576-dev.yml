@@ -116,8 +116,8 @@ jobs:
           PY
             make olddefconfig
             make -j"$(nproc)" M=drivers/rknpu clean
-            make -j"$(nproc)" modules_prepare
-            make -j"$(nproc)" M=drivers/rknpu modules
+            make -j"$(nproc)" modules_prepare LOCALVERSION=-legacy-rockchip-rk3576
+            make -j"$(nproc)" M=drivers/rknpu modules LOCALVERSION=-legacy-rockchip-rk3576
             cp drivers/rknpu/rknpu.ko "$out"
           }
           build_variant gem  "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
@@ -138,7 +138,11 @@ jobs:
                    "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko"
           modinfo -F description "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
           modinfo -F description "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko"
-          modinfo -F vermagic "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko"
+          # The modules must match the kernel the board is running.
+          modinfo -F vermagic "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_drm.ko" \
+            | grep -q '^6.1.172-legacy-rockchip-rk3576 '
+          modinfo -F vermagic "$GITHUB_WORKSPACE/output/rk3576-dev/opt/rknpu/rknpu_heap.ko" \
+            | grep -q '^6.1.172-legacy-rockchip-rk3576 '
       - name: Verify and collect artifacts
         if: success()
         run: |

@@ -123,13 +123,15 @@ jobs:
           # object differs between the two builds.
           grep -q 'CONFIG_ROCKCHIP_RKNPU_DRM_GEM_MODULE 1' include/generated/autoconf.h
           make -j"$(nproc)" M=drivers/rknpu clean
-          make -j"$(nproc)" modules_prepare
-          make -j"$(nproc)" M=drivers/rknpu modules
+          make -j"$(nproc)" modules_prepare LOCALVERSION=-legacy-rockchip-rk3576
+          make -j"$(nproc)" M=drivers/rknpu modules LOCALVERSION=-legacy-rockchip-rk3576
           mkdir -p /tmp/rknpu-out
           cp drivers/rknpu/rknpu.ko /tmp/rknpu-out/rknpu_drm.ko
           modinfo /tmp/rknpu-out/rknpu_drm.ko | tee /tmp/rknpu-out/rknpu_drm.modinfo
           # The DRM variant must not contain the dma-buf heap memory manager.
           ! nm /tmp/rknpu-out/rknpu_drm.ko | grep -q 'U misc_register'
+          # The module must match the kernel the board is running.
+          modinfo -F vermagic /tmp/rknpu-out/rknpu_drm.ko | grep -q '^6.1.172-legacy-rockchip-rk3576 '
 
       - name: Build rknpu_heap.ko (DMA heap memory manager)
         run: |
@@ -154,13 +156,15 @@ jobs:
           grep -q 'CONFIG_ROCKCHIP_RKNPU_DMA_HEAP_MODULE 1' include/generated/autoconf.h
           # Rebuild the driver objects so the heap variant replaces the gem one.
           make -j"$(nproc)" M=drivers/rknpu clean
-          make -j"$(nproc)" modules_prepare
-          make -j"$(nproc)" M=drivers/rknpu modules
+          make -j"$(nproc)" modules_prepare LOCALVERSION=-legacy-rockchip-rk3576
+          make -j"$(nproc)" M=drivers/rknpu modules LOCALVERSION=-legacy-rockchip-rk3576
           mkdir -p /tmp/rknpu-out
           cp drivers/rknpu/rknpu.ko /tmp/rknpu-out/rknpu_heap.ko
           modinfo /tmp/rknpu-out/rknpu_heap.ko | tee /tmp/rknpu-out/rknpu_heap.modinfo
           # The heap variant must not contain the DRM GEM memory manager.
           ! nm /tmp/rknpu-out/rknpu_heap.ko | grep -q 'U drm_dev_register'
+          # The module must match the kernel the board is running.
+          modinfo -F vermagic /tmp/rknpu-out/rknpu_heap.ko | grep -q '^6.1.172-legacy-rockchip-rk3576 '
 
       - name: Verify modules and add switch script
         run: |
