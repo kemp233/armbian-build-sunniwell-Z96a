@@ -1,0 +1,12 @@
+diff --git a/drivers/iommu/dma-iommu.c b/drivers/iommu/dma-iommu.c
+index cbf9ec320691..1c43e1e20a83 100644
+--- a/drivers/iommu/dma-iommu.c
++++ b/drivers/iommu/dma-iommu.c
+@@ -317,6 +317,7 @@ int iommu_get_dma_cookie(struct iommu_domain *domain)
+ 	mutex_init(&domain->iova_cookie->mutex);
+ 	return 0;
+ }
++EXPORT_SYMBOL(iommu_get_dma_cookie);
+ 
+ /**
+  * iommu_get_msi_cookie - Acquire just MSI remapping resources
