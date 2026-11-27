@@ -25,10 +25,91 @@ index 8c228022a8a6..0c7fe14a7706 100644
  	default:
  		break;
 diff --git a/drivers/rknpu/rknpu_mem.c b/drivers/rknpu/rknpu_mem.c
-index fc03b08aa31e..6013116a0ad3 100644
+index fc03b08aa31e..cd70c940dfa5 100644
 --- a/drivers/rknpu/rknpu_mem.c
 +++ b/drivers/rknpu/rknpu_mem.c
-@@ -344,7 +344,8 @@ static void __maybe_unused rknpu_dma_buf_sync(
+@@ -17,58 +17,16 @@
+ 
+ #if IS_ENABLED(CONFIG_ROCKCHIP_RKNPU_DMA_HEAP)
+ 
+-#if KERNEL_VERSION(6, 1, 115) < LINUX_VERSION_CODE
+-#ifdef CONFIG_ARM64
+ /*
+- * Check whether a kernel address is valid (derived from arch/x86/).
++ * The Rockchip kern_addr_valid() helper that used to live here walked the
++ * page tables to decide whether an address looks like a kernel address.
++ * It referenced init_mm, which the kernel does not export, so the driver
++ * could not be loaded as a module ("Unknown symbol in module: init_mm").
++ *
++ * The object address now has to be a live rknpu_mem_object of the current
++ * session, which is checked against the session list.  That is a stronger
++ * test than "the address is mapped" and needs no page table walk.
+  */
+-static int kern_addr_valid(unsigned long addr)
+-{
+-	pgd_t *pgdp;
+-	p4d_t *p4dp;
+-	pud_t *pudp, pud;
+-	pmd_t *pmdp, pmd;
+-	pte_t *ptep, pte;
+-
+-	addr = arch_kasan_reset_tag(addr);
+-	if ((((long)addr) >> VA_BITS) != -1UL)
+-		return 0;
+-
+-	pgdp = pgd_offset_k(addr);
+-	if (pgd_none(READ_ONCE(*pgdp)))
+-		return 0;
+-
+-	p4dp = p4d_offset(pgdp, addr);
+-	if (p4d_none(READ_ONCE(*p4dp)))
+-		return 0;
+-
+-	pudp = pud_offset(p4dp, addr);
+-	pud = READ_ONCE(*pudp);
+-	if (pud_none(pud))
+-		return 0;
+-
+-	if (pud_sect(pud))
+-		return pfn_valid(pud_pfn(pud));
+-
+-	pmdp = pmd_offset(pudp, addr);
+-	pmd = READ_ONCE(*pmdp);
+-	if (pmd_none(pmd))
+-		return 0;
+-
+-	if (pmd_sect(pmd))
+-		return pfn_valid(pmd_pfn(pmd));
+-
+-	ptep = pte_offset_kernel(pmdp, addr);
+-	pte = READ_ONCE(*ptep);
+-	if (pte_none(pte))
+-		return 0;
+-
+-	return pfn_valid(pte_pfn(pte));
+-}
+-#else
+-#define kern_addr_valid(addr)	(1)
+-#endif
+-#endif
+ 
+ int rknpu_mem_create_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+ 			   unsigned int cmd, unsigned long data)
+@@ -237,13 +195,6 @@ int rknpu_mem_destroy_ioctl(struct rknpu_device *rknpu_dev, struct file *file,
+ 		return ret;
+ 	}
+ 
+-	if (!kern_addr_valid(args.obj_addr)) {
+-		LOG_ERROR("%s: invalid obj_addr: %#llx\n", __func__,
+-			  (__u64)(uintptr_t)args.obj_addr);
+-		ret = -EINVAL;
+-		return ret;
+-	}
+-
+ 	rknpu_obj = (struct rknpu_mem_object *)(uintptr_t)args.obj_addr;
+ 	LOG_DEBUG(
+ 		"free args.handle: %d, rknpu_obj: %#llx, rknpu_obj->dma_addr: %#llx\n",
+@@ -344,7 +295,8 @@ static void __maybe_unused rknpu_dma_buf_sync(
  	}
  }
  
@@ -38,19 +119,26 @@ index fc03b08aa31e..6013116a0ad3 100644
  {
  	struct rknpu_mem_object *rknpu_obj = NULL;
  	struct rknpu_mem_sync args;
-@@ -369,6 +370,42 @@ int rknpu_mem_sync_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
+@@ -360,15 +312,42 @@ int rknpu_mem_sync_ioctl(struct rknpu_device *rknpu_dev, unsigned long data)
+ 		return ret;
+ 	}
  
+-	if (!kern_addr_valid(args.obj_addr)) {
+-		LOG_ERROR("%s: invalid obj_addr: %#llx\n", __func__,
+-			  (__u64)(uintptr_t)args.obj_addr);
+-		ret = -EINVAL;
+-		return ret;
+-	}
+-
  	rknpu_obj = (struct rknpu_mem_object *)(uintptr_t)args.obj_addr;
  
-+	/* The object address comes from user space.  kern_addr_valid() only
-+	 * proves that the value is a kernel address; it does not prove that
-+	 * the address still refers to a live rknpu_mem_object.  The object
-+	 * can already have been released by rknpu_release() when the
-+	 * /dev/rknpu fd is closed before the dma_buf fd, or the user can
-+	 * simply pass an arbitrary kernel address.  Dereferencing such a
-+	 * stale pointer walks a bogus sg_table and makes the following
-+	 * dma_sync_single_range_*() write to an unmapped/read-only
-+	 * address, which oopses the kernel.
++	/* The object address comes from user space and must still refer to a
++	 * live rknpu_mem_object of this session.  The object can already have
++	 * been released by rknpu_release() when the /dev/rknpu fd is closed
++	 * before the dma_buf fd, or the caller can pass an arbitrary kernel
++	 * address.  Dereferencing such a stale pointer walks a bogus
++	 * sg_table and makes the following dma_sync_single_range_*() write to
++	 * an unmapped/read-only address, which oopses the kernel.
 +	 *
 +	 * Validate the object against this session's list, exactly like
 +	 * rknpu_mem_destroy_ioctl() does, and refuse anything unknown. */
