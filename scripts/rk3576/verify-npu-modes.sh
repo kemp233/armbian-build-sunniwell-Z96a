@@ -29,13 +29,15 @@ log() { printf '%s\n' "$*"; }
 err() { printf 'verify: %s\n' "$*" >&2; }
 
 current_mode() {
-    local desc
-    desc="$(modinfo -F description rknpu 2>/dev/null)"
-    case "$desc" in
-        *"DRM GEM memory manager"*)  echo drm ;;
-        *"DMA heap memory manager"*) echo heap ;;
-        *) echo none ;;
-    esac
+    if [ -e /dev/dri/card0 ]; then
+        echo drm
+    elif [ -e /dev/rknpu ]; then
+        echo heap
+    elif [ -d /sys/module/rknpu ]; then
+        echo loaded
+    else
+        echo none
+    fi
 }
 
 # device nodes each mode must provide
@@ -98,25 +100,29 @@ fi
 log "verify: current mode = ${ORIGINAL_MODE:-unknown}"
 
 overall=0
-for mode in heap drm; do
-    log ""
-    log "=== mode: $mode ==="
-    if ! "$MODE_DIR/npu-mode" "$mode"; then
-        err "failed to switch to $mode"
-        overall=1
-        continue
-    fi
-    check_nodes "$mode" || overall=1
-    run_encoder "$mode" || overall=1
-done
+
+# The RKNPU module cannot be unloaded at runtime (rmmod deadlocks in heap
+# mode and panics the kernel in drm mode), so only the mode that is running
+# right now is exercised here.  Use "npu-mode <mode>" plus a reboot to test
+# the other one.
+mode="$ORIGINAL_MODE"
+log ""
+log "=== mode: $mode ==="
+check_nodes "$mode" || overall=1
+run_encoder "$mode" || overall=1
 
 log ""
-log "=== restoring original mode: ${ORIGINAL_MODE:-heap} ==="
-"$MODE_DIR/npu-mode" "${ORIGINAL_MODE:-heap}" || overall=1
+log "=== kernel health ==="
+oops=$(dmesg 2>/dev/null | grep -c "Unable to handle kernel")
+log "verify: kernel oops count = $oops"
+if [ "$oops" -gt 0 ]; then
+    err "the kernel oopsed $oops time(s)"
+    overall=1
+fi
 
 log ""
 if [ $overall -eq 0 ]; then
-    log "verify: all modes loaded and the encoder ran in both"
+    log "verify: mode '${mode}' is healthy and the encoder ran"
 else
     log "verify: problems were found (see the messages above)"
 fi

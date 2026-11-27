@@ -32,21 +32,34 @@ for f in rknpu_drm.ko rknpu_heap.ko npu-mode npu-mode-load; do
 done
 
 mkdir -p "$MOD_DIR"
-install -m 0644 "$SRC_DIR/rknpu_drm.ko"  "$MOD_DIR/rknpu_drm.ko"
-install -m 0644 "$SRC_DIR/rknpu_heap.ko" "$MOD_DIR/rknpu_heap.ko"
-install -m 0755 "$SRC_DIR/npu-mode"      "$MOD_DIR/npu-mode"
-install -m 0755 "$SRC_DIR/npu-mode-load" "$MOD_DIR/npu-mode-load"
-
-# Default mode: keep the mode the kernel currently runs with, otherwise heap.
-if [ ! -f /etc/npu_mode ]; then
-    if [ -d /sys/module/rknpu ]; then
-        desc="$(modinfo -F description rknpu 2>/dev/null || true)"
-        case "$desc" in
-            *"DRM GEM memory manager"*) echo drm  > /etc/npu_mode ;;
-            *)                          echo heap > /etc/npu_mode ;;
-        esac
+# "install" refuses when source and destination are the same file, so copy
+# through a temporary file when the script runs from the module directory.
+copy_file() {
+    local src="$1" dst="$2" mode="$3"
+    if [ "$(readlink -f "$src")" = "$(readlink -f "$dst")" ]; then
+        local tmp
+        tmp="$(mktemp)"
+        cat "$src" > "$tmp"
+        install -m "$mode" "$tmp" "$dst"
+        rm -f "$tmp"
     else
+        install -m "$mode" "$src" "$dst"
+    fi
+}
+
+copy_file "$SRC_DIR/rknpu_drm.ko"  "$MOD_DIR/rknpu_drm.ko"  0644
+copy_file "$SRC_DIR/rknpu_heap.ko" "$MOD_DIR/rknpu_heap.ko" 0644
+copy_file "$SRC_DIR/npu-mode"      "$MOD_DIR/npu-mode"      0755
+copy_file "$SRC_DIR/npu-mode-load" "$MOD_DIR/npu-mode-load" 0755
+
+# Default mode: keep the mode the kernel currently runs with, otherwise drm.
+if [ ! -f /etc/npu_mode ]; then
+    if [ -e /dev/dri/card0 ]; then
+        echo drm > /etc/npu_mode
+    elif [ -e /dev/rknpu ]; then
         echo heap > /etc/npu_mode
+    else
+        echo drm > /etc/npu_mode
     fi
 fi
 
@@ -57,4 +70,6 @@ systemctl enable npu-mode.service
 ln -sf "$MOD_DIR/npu-mode" /usr/local/bin/npu-mode
 
 echo "install-npu-mode: installed into $MOD_DIR (current mode: $(cat /etc/npu_mode))"
-echo "install-npu-mode: run 'npu-mode status', switch with 'npu-mode drm' / 'npu-mode heap'"
+echo "install-npu-mode: run 'npu-mode status' to see the state,"
+echo "install-npu-mode: switch with 'npu-mode drm' / 'npu-mode heap' then 'npu-mode apply'"
+echo "install-npu-mode: (the module cannot be unloaded at runtime, a reboot is required)"
