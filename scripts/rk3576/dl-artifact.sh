@@ -96,7 +96,7 @@ signed_url() {
 
 : > "$STATUS"
 attempt=0
-while [ $attempt -lt 12 ]; do
+while [ $attempt -lt 60 ]; do
     attempt=$((attempt + 1))
     URL="$(signed_url)"
     if [ -z "$URL" ]; then
