@@ -1,0 +1,14 @@
+[Unit]
+Description=Z96A rk809 speaker gain fix (HP Output Gain via spk-use-hp-channel)
+# 声卡由 simple-card + rk809 codec 在系统启动早期注册;
+# sound.target 保证 ALSA 卡与混音器控件已存在。
+After=sound.target
+ConditionPathExists=/proc/asound/cards
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/armbian/z96a-audio-setup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
