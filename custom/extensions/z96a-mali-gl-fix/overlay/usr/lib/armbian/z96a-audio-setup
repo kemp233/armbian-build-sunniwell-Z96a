@@ -1,0 +1,37 @@
+#!/bin/bash
+# Z96A 音频增益修复 —— 开机一次性执行, 之后 alsactl 常规恢复接管。
+#
+# 背景 (2026-11-28 ftrace 定案):
+#   DTS 里 rk809 codec 带两行关键属性: use-ext-amplifier; spk-use-hp-channel;
+#   即喇叭输出走 **耳机通道 + 外部功放**(spk-ctl-gpios)。排查时功放 GPIO
+#   (gpio-102) 在播放中正常拉高、Playback Path=SPK 正确、DAC 音量 245 ——
+#   全链路唯一为零的就是 "HP Output Gain"(出厂默认 0)。拉满(3=9dB)即出声。
+#
+# 幂等: 每次都重设, 值相同则 alsamixer 无副作用。失败不挡开机, 不 set -e。
+set -u
+log() { echo "z96a-audio-setup: $*"; }
+
+# 找 rk809/rk817 codec 的 ALSA 卡号 (HDMI 是 card0, 麦克风阵列是 es7202)
+CARD=""
+for c in /proc/asound/card[0-9]*/id; do
+	if grep -qE "rk809|rk817" "$c" 2>/dev/null; then
+		CARD=$(basename "$(dirname "$c")"); CARD=${CARD#card}
+		break
+	fi
+done
+if [ -z "$CARD" ]; then
+	log "未找到 rk809/rk817 codec 卡, 跳过 (后续启动会重试)"
+	exit 0
+fi
+
+# 喇叭通道增益拉满 (0-3, 3dB/步, 3=9dB); 播放路径固定 SPK
+amixer -c "$CARD" cset name="HP Output Gain" 3 >/dev/null 2>&1 \
+	&& log "HP Output Gain = 3 (9dB)" \
+	|| log "HP Output Gain 设置失败"
+amixer -c "$CARD" cset name="Playback Path" 2 >/dev/null 2>&1 \
+	&& log "Playback Path = SPK" \
+	|| log "Playback Path 设置失败"
+
+# 固化到 asound.state, 之后每次开机由 alsa-restore 常规恢复
+alsactl store 2>/dev/null && log "已 alsactl store 固化"
+exit 0
